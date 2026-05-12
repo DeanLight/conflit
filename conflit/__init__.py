@@ -1,21 +1,23 @@
-"""Layered YAML configuration and Pydantic validation."""
+"""Layered YAML composition, merge strategy, and validation helpers."""
 
 from conflit.config import (
-    load_and_validate,
-    load_main_and_validate,
-    load_settings,
-    parse_dotted_overrides,
-    validate_config,
-)
-from conflit.compose import YamlRootError
-from conflit.yaml_loading import (
     TAG_APPEND,
     TAG_MERGE,
     ConflitLoader,
     TaggedAppend,
     TaggedMerge,
+    YamlRootError,
+    load,
+    load_and_validate,
+    load_main_and_validate,
+    load_settings,
+    load_yaml_documents,
     load_yaml_path,
     load_yaml_text,
+    merge_yamls,
+    parse_dotted_overrides,
+    validate_config,
+    yaml_validate,
 )
 
 __all__ = [
@@ -25,11 +27,15 @@ __all__ = [
     "TaggedAppend",
     "TaggedMerge",
     "YamlRootError",
+    "load",
     "load_and_validate",
     "load_main_and_validate",
     "load_settings",
+    "load_yaml_documents",
     "load_yaml_path",
     "load_yaml_text",
+    "merge_yamls",
     "parse_dotted_overrides",
     "validate_config",
+    "yaml_validate",
 ]

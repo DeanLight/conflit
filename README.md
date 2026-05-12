@@ -22,3 +22,8 @@ poe nb       # generate .ipynb notebooks from .py source files
 1. Edit `.py` files directly — these are the source of truth.
 2. Run `poe sync` to propagate changes to `.ipynb` notebooks.
 3. Commit only `.py` files (`.ipynb` files are gitignored).
+
+## Examples
+
+See [`examples/`](examples/) for a layered compose example (including YAML anchors)
+and a percent-format notebook script that rich-prints composition steps.
