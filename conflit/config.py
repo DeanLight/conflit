@@ -44,7 +44,6 @@ from yaml.nodes import MappingNode, SequenceNode
 T = TypeVar("T", bound=BaseModel)
 log = structlog.stdlib.get_logger(__name__)
 stdlib_log = logging.getLogger(__name__)
-NamespaceDoc = tuple[str, dict[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +109,9 @@ def read_yaml_strict(path: Path) -> dict[str, Any]:
     return raw
 
 
+NamespaceDoc = tuple[str, dict[str, Any]]
+
+
 def load_namespaces(
     path: Path,
     *,
@@ -121,7 +123,7 @@ def load_namespaces(
 
     Rules:
     - Namespace `"."` means root merge.
-    - Child compose entries may include `into`/`merge_into` to place data under a dotted path.
+    - `_compose` is a list of YAML file paths.
     - Resolution is depth-first: children first, then current document body.
 
     Args:
@@ -143,43 +145,14 @@ def load_namespaces(
     if raw_compose is not None:
         if not isinstance(raw_compose, list):
             raise TypeError(f"{compose_key} must be a list")
-        for entry in raw_compose:
-            if isinstance(entry, str):
-                include_path = entry
-                into = "."
-            elif isinstance(entry, dict):
-                unknown = sorted(set(entry) - {"path", "file", "into", "merge_into"})
-                if unknown:
-                    raise ValueError(f"{compose_key} mapping has unsupported keys: {unknown!r}")
-                if "path" in entry and "file" in entry:
-                    raise ValueError('use only one of "path" or "file" in compose mappings')
-                include_path = entry.get("path", entry.get("file"))
-                if include_path is None:
-                    raise ValueError('compose mapping requires "path" or "file"')
-                if "into" in entry and "merge_into" in entry:
-                    raise ValueError('use only one of "into" or "merge_into" in compose mappings')
-                into = entry["into"] if "into" in entry else entry.get("merge_into", ".")
-            else:
-                raise TypeError(f"{compose_key} entries must be strings or mappings")
-
-            if into is None:
-                into = "."
-            if not isinstance(into, str):
-                raise TypeError("compose namespace must be string or null")
-            into = into.strip() or "."
-            if into != "." and any(seg == "" for seg in into.split(".")):
-                raise ValueError(f"compose namespace contains empty segment: {into!r}")
-
+        for include_path in raw_compose:
+            if not isinstance(include_path, str):
+                raise TypeError(f"{compose_key} entries must be file paths (strings)")
             include_abs = Path(include_path)
-            include_abs = include_abs.resolve() if include_abs.is_absolute() else (canon.parent / include_abs).resolve()
-            child_docs = load_namespaces(include_abs, compose_key=compose_key, stack=(*stack, canon))
-            for child_namespace, child_obj in child_docs:
-                if into == ".":
-                    docs.append((child_namespace, child_obj))
-                elif child_namespace == ".":
-                    docs.append((into, child_obj))
-                else:
-                    docs.append((f"{into}.{child_namespace}", child_obj))
+            include_abs = (
+                include_abs.resolve() if include_abs.is_absolute() else (canon.parent / include_abs).resolve()
+            )
+            docs.extend(load_namespaces(include_abs, compose_key=compose_key, stack=(*stack, canon)))
 
     docs.append((".", {k: v for k, v in raw.items() if k != compose_key}))
     return docs
@@ -319,31 +292,13 @@ def strip_conflit_markers(obj: Any) -> Any:
     return obj
 
 
-def resolve_yaml_document(path: Path, *, compose_key: str = "_compose") -> dict[str, Any]:
-    """Convenience helper for one file: compose expansion then merge."""
-    return merge_yamls(load_namespaces(path, compose_key=compose_key))
-
-
-def load_main_yaml_dict(main_path: Path, *, compose_key: str = "_compose") -> dict[str, Any]:
-    """Resolve one main config and remove metadata keys used for docs only."""
-    body = resolve_yaml_document(main_path.resolve(), compose_key=compose_key)
-    body.pop("description", None)
-    return strip_conflit_markers(body)
-
-
-def _lower_keys(obj: Any) -> Any:
-    if isinstance(obj, dict):
-        return {str(k).lower(): _lower_keys(v) for k, v in obj.items()}
-    return obj
-
-
 def yaml_validate(obj: Mapping[str, Any], config_cls: type[T]) -> T:
     """Validate merged YAML dict against a Pydantic model class."""
-    return config_cls.model_validate(_lower_keys(strip_conflit_markers(dict(obj))))
+    return config_cls.model_validate(strip_conflit_markers(dict(obj)))
 
 
 def load(
-    config_files: list[Path] | Path,
+    config_file: Path,
     *,
     compose_key: str = "_compose",
     overrides: Mapping[str, Any] | None = None,
@@ -354,10 +309,7 @@ def load(
 
     Returns merged dict when no `config_cls` is supplied.
     """
-    paths = [config_files] if isinstance(config_files, Path) else list(config_files)
-    docs: list[NamespaceDoc] = []
-    for cfg in paths:
-        docs.extend(load_namespaces(Path(cfg), compose_key=compose_key))
+    docs = load_namespaces(Path(config_file), compose_key=compose_key)
     if overrides:
         docs.append((".", dict(overrides)))
     clean = strip_conflit_markers(merge_yamls(docs))
@@ -390,20 +342,33 @@ if test():
             encoding="utf-8",
         )
         (t / "overlay.yaml").write_text(
-            "inner: !merge\n  retries: 5\nnested: !merge\n  x: 1\n",
+            """
+inner: !merge
+  retries: 5
+nested: !merge
+  x: 1
+""",
             encoding="utf-8",
         )
         (t / "main.yaml").write_text(
-            "_compose:\n  - base.yaml\n  - overlay.yaml\ndescription: ignored\nnested: !merge\n  y: 2\n",
+            """
+_compose:
+  - base.yaml
+  - overlay.yaml
+description: ignored
+nested: !merge
+  y: 2
+""",
             encoding="utf-8",
         )
         docs = load_namespaces(t / "main.yaml")
         assert docs[0][0] == "."
-        assert load_main_yaml_dict(t / "main.yaml") == {
+        assert load(t / "main.yaml") == {
             "name": "base",
             "inner": {"url": "http://base", "retries": 5},
+            "description": "ignored",
             "nested": {"x": 1, "y": 2},
         }
-        loaded = load([t / "main.yaml"], config_cls=_Scenario)
+        loaded = load(t / "main.yaml", config_cls=_Scenario)
         assert loaded.inner.retries == 5
 

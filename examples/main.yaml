@@ -1,7 +1,6 @@
 _compose:
   - common.yaml
-  - path: production.yaml
-    into: environments.production
+  - production.yaml
 
 description: "Example layered config with compose, merge tags, and YAML anchors"
 app_name: conflit-demo
