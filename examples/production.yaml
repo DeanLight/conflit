@@ -1,19 +1,23 @@
-database_defaults: &database_defaults
-  host: db.prod.local
-  port: 5432
-  pool_size: 20
-
 database:
   primary:
-    <<: *database_defaults
+    <<: &database_defaults
+      host: db.prod.local
+      port: 5432
+      pool_size: 20
   read_replica:
     <<: *database_defaults
     host: db-read.prod.local
 
 service:
   api: !merge
-    timeout_seconds: 45
+    <<: &prod_service_tuning
+      timeout_seconds: 45
+      retries: 5
+      backoff_seconds: 2
     base_url: "https://api.prod.local"
+  worker: !merge
+    <<: *prod_service_tuning
+    queue: critical
   features: !merge
     flags: !append
       - caching

@@ -23,9 +23,9 @@
 # %%
 from pathlib import Path
 
-import yaml
 from rich import print
 from rich.pretty import Pretty
+from rich.syntax import Syntax
 
 from conflit import load, load_yaml_documents
 
@@ -33,13 +33,14 @@ EXAMPLES_DIR = Path(__file__).resolve().parent if "__file__" in globals() else P
 MAIN_FILE = EXAMPLES_DIR / "main.yaml"
 
 # %% [markdown]
-# ## Raw source files
+# ## Raw YAML source (anchors + aliases for DRY)
 
 # %%
 for source in ("common.yaml", "production.yaml", "main.yaml"):
     path = EXAMPLES_DIR / source
+    text = path.read_text(encoding="utf-8")
     print(f"\n[bold cyan]{source}[/bold cyan]")
-    print(Pretty(yaml.safe_load(path.read_text(encoding="utf-8"))))
+    print(Syntax(text, "yaml", word_wrap=True))
 
 # %% [markdown]
 # ## Compose expansion output (`namespace`, `yaml object`)

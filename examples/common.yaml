@@ -1,11 +1,21 @@
-defaults: &service_defaults
-  timeout_seconds: 15
-  retries: 2
-
 service:
   api:
-    <<: *service_defaults
+    <<: &service_defaults
+      timeout_seconds: 15
+      retries: 2
+      backoff_seconds: 1
     base_url: "https://api.staging.local"
+    tls: &tls_defaults
+      verify: true
+      ca_bundle: /etc/ssl/certs/ca-certificates.crt
+  worker:
+    <<: *service_defaults
+    queue: default
+    tls: *tls_defaults
+  scheduler:
+    <<: *service_defaults
+    cron: "*/5 * * * *"
   features:
-    flags:
+    flags: &base_feature_flags
       - base
+      - healthcheck
