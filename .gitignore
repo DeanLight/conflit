@@ -1,0 +1,8 @@
+conflit/**/*.ipynb
+conflit/*.ipynb
+.ipynb_checkpoints/
+__pycache__/
+*.egg-info/
+.venv/
+dist/
+.env

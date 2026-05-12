@@ -1,0 +1,48 @@
+[project]
+name = "conflit"
+version = "0.1.0"
+description = "lightweight configuration management library"
+authors = [{name = "Dean Light"}]
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.9.21,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[dependency-groups]
+dev = [
+    "juplit>=0.0.7",
+    "poethepoet>=0.25.0",
+    "ipykernel>=6.0.0",
+    "pre-commit>=3.0.0",
+    "pytest>=8.0.0",
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.0.0",
+    "mkdocs-jupyter>=0.24.0",
+    "mkdocstrings[python]>=0.24.0",
+]
+
+[tool.poe.tasks]
+init         = {cmd = "pre-commit install", help = "Install git hooks"}
+sync         = {cmd = "juplit sync", help = "Sync .py<->ipynb for all paired notebooks"}
+nb           = {cmd = "juplit nb",   help = "Generate .ipynb from .py files (run after cloning)"}
+clean        = {cmd = "juplit clean",help = "Sync then delete all .ipynb files"}
+test         = {cmd = "pytest",      help = "Run tests"}
+docs         = {cmd = "mkdocs serve",          help = "Serve docs locally for preview"}
+docs-build   = {cmd = "mkdocs build",          help = "Build docs site"}
+docs-deploy  = {cmd = "mkdocs gh-deploy --force", help = "Deploy docs to GitHub Pages"}
+
+[tool.juplit]
+notebook_src_dir = "conflit"
+
+[tool.jupytext]
+formats = "ipynb,py:percent"
+
+[tool.pytest.ini_options]
+python_files = ["*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
