@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "lightweight configuration management library"
 authors = [{name = "Dean Light"}]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "dynaconf>=3.2.0",
+    "juplit>=0.0.7",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.21,<0.10.0"]
@@ -15,7 +20,6 @@ module-root = ""
 
 [dependency-groups]
 dev = [
-    "juplit>=0.0.7",
     "poethepoet>=0.25.0",
     "ipykernel>=6.0.0",
     "pre-commit>=3.0.0",
@@ -43,6 +47,7 @@ notebook_src_dir = "conflit"
 formats = "ipynb,py:percent"
 
 [tool.pytest.ini_options]
-python_files = ["*.py"]
+testpaths = ["conflit"]
+python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
