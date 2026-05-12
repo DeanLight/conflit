@@ -27,7 +27,8 @@ from rich import print
 from rich.pretty import Pretty
 from rich.syntax import Syntax
 
-from conflit import load, load_yaml_documents
+from conflit import load
+from conflit.config import load_namespaces
 
 EXAMPLES_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path("examples").resolve()
 MAIN_FILE = EXAMPLES_DIR / "main.yaml"
@@ -46,7 +47,7 @@ for source in ("common.yaml", "production.yaml", "main.yaml"):
 # ## Compose expansion output (`namespace`, `yaml object`)
 
 # %%
-docs = load_yaml_documents(MAIN_FILE)
+docs = load_namespaces(MAIN_FILE)
 for namespace, payload in docs:
     print(f"\n[green]namespace[/green] = [bold]{namespace}[/bold]")
     print(Pretty(payload))

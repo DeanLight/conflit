@@ -1,6 +1,10 @@
-"""Pytest entry: submodule imports execute juplit ``if test()`` blocks in those modules."""
+"""Pytest entry for package import smoke checks."""
 
-def test_import_package_runs_inline_checks() -> None:
-    import conflit  # noqa: F401 — config, compose, yaml_loading guarded blocks
+from pathlib import Path
 
-    import conflit.merge_strategy  # noqa: F401 — not re-exported at package root
+
+def test_import_and_load_smoke() -> None:
+    import conflit
+
+    sample = conflit.load(Path("examples/main.yaml"))
+    assert "service" in sample
