@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -42,7 +43,8 @@ from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode, SequenceNode
 
 T = TypeVar("T", bound=BaseModel)
-log = structlog.get_logger(__name__)
+log = structlog.stdlib.get_logger(__name__)
+stdlib_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,13 +304,14 @@ def merge_yamls(base: dict[str, Any], overlay: Mapping[str, Any], *, path: str =
         strategy, peeled = peel_merge_strategy(raw_overlay)
         existing = base.get(key, _MISSING)
         key_path = key if path == "." else f"{path}.{key}"
-        log.debug(
-            "merge.step",
-            path=key_path,
-            strategy=strategy.value,
-            existing_type=type(existing).__name__,
-            incoming_type=type(peeled).__name__,
-        )
+        if stdlib_log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                "merge.step",
+                path=key_path,
+                strategy=strategy.value,
+                existing_type=type(existing).__name__,
+                incoming_type=type(peeled).__name__,
+            )
 
         if strategy == MergeStrategy.OVERRIDE:
             base[key] = copy.deepcopy(peeled)
