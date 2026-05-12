@@ -109,6 +109,28 @@ def read_yaml_strict(path: Path) -> dict[str, Any]:
     return raw
 
 
+if test():
+    tagged = load_yaml_text(
+        """
+merged: !merge
+  x: 1
+items: !append
+  - a
+"""
+    )
+    assert isinstance(tagged["merged"], TaggedMerge)
+    assert isinstance(tagged["items"], TaggedAppend)
+
+
+if test():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp_s:
+        path = Path(tmp_s) / "simple.yaml"
+        path.write_text("value: 1\n", encoding="utf-8")
+        assert read_yaml_strict(path) == {"value": 1}
+
+
 NamespaceDoc = tuple[str, dict[str, Any]]
 
 
@@ -158,6 +180,16 @@ def load_namespaces(
     return docs
 
 
+if test():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp_s:
+        t = Path(tmp_s)
+        (t / "base.yaml").write_text("a: 1\n", encoding="utf-8")
+        (t / "main.yaml").write_text("_compose:\n  - base.yaml\nb: 2\n", encoding="utf-8")
+        assert load_namespaces(t / "main.yaml") == [(".", {"a": 1}), (".", {"b": 2})]
+
+
 class MergeStrategy(StrEnum):
     OVERRIDE = "override"
     MERGE = "merge"
@@ -179,6 +211,15 @@ def peel_merge_strategy(value: Any) -> tuple[MergeStrategy, Any]:
             raise ValueError(f"unknown _conflit strategy {raw!r}") from exc
         return strategy, {k: v for k, v in value.items() if k != "_conflit"}
     return MergeStrategy.OVERRIDE, value
+
+
+if test():
+    assert peel_merge_strategy(TaggedMerge({"x": 1}))[0] is MergeStrategy.MERGE
+    assert peel_merge_strategy(TaggedAppend(["a"]))[0] is MergeStrategy.APPEND
+    assert peel_merge_strategy({"_conflit": "merge", "x": 1}) == (
+        MergeStrategy.MERGE,
+        {"x": 1},
+    )
 
 
 def _coerce_append_list(peeled: Any) -> list[Any]:
@@ -280,6 +321,16 @@ def merge_yamls(namespaces: list[NamespaceDoc]) -> dict[str, Any]:
     return merged
 
 
+if test():
+    assert merge_yamls([(".", {"x": 1}), ("svc.api", {"timeout": 5})]) == {
+        "x": 1,
+        "svc": {"api": {"timeout": 5}},
+    }
+    assert merge_yamls([(".", {"tags": ["a"]}), (".", {"tags": TaggedAppend(["b"])})]) == {
+        "tags": ["a", "b"]
+    }
+
+
 def strip_conflit_markers(obj: Any) -> Any:
     if isinstance(obj, TaggedMerge):
         return strip_conflit_markers(obj.mapping)
@@ -290,6 +341,11 @@ def strip_conflit_markers(obj: Any) -> Any:
     if isinstance(obj, list):
         return [strip_conflit_markers(x) for x in obj]
     return obj
+
+
+if test():
+    assert strip_conflit_markers({"a": TaggedMerge({"b": 1})}) == {"a": {"b": 1}}
+    assert strip_conflit_markers({"x": {"_conflit": "merge", "y": 2}}) == {"x": {"y": 2}}
 
 
 def yaml_validate(obj: Mapping[str, Any], config_cls: type[T]) -> T:
