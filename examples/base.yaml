@@ -1,0 +1,34 @@
+# Baseline training configuration for the Orion model.
+# These are the shared defaults used across all environments.
+# Override specific keys in environment-specific files using !merge / !append.
+
+model:
+  architecture: transformer
+  num_layers: 6
+  hidden_dim: 512
+  num_heads: 8
+  dropout: 0.1
+
+training:
+  optimizer: adamw
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  max_epochs: 20
+  batch_size: 32
+  gradient_clip: 1.0
+  warmup_steps: 500
+
+data:
+  train_path: data/train.parquet
+  val_path: data/val.parquet
+  num_workers: 4
+  pin_memory: false
+
+logging:
+  level: info
+  log_every_n_steps: 50
+  save_dir: runs/
+
+features:
+  - mixed_precision
+  - gradient_checkpointing

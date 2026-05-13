@@ -1,0 +1,7 @@
+# Hardware spec for the GPU cluster — composed under the "hardware" namespace
+# in experiment.yaml so all keys land at hardware.* in the final config.
+
+accelerator: a100
+count: 8
+memory_gb: 80
+interconnect: nvlink
