@@ -19,7 +19,7 @@ plugins:
             show_root_heading: true
   - mkdocs-jupyter:
       include: ["**/*.ipynb"]
-      ignore_h1: false
+      ignore_h1_titles: false
 
 nav:
   - Home: index.md
