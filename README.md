@@ -2,6 +2,8 @@
 
 Layered YAML configuration for Python. Compose multiple config files, patch nested keys without repeating unchanged ones, accumulate lists across layers, and optionally validate the result with Pydantic.
 
+## TLDR
+
 ```yaml
 # base.yaml
 model:
