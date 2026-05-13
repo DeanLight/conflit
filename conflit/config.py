@@ -516,6 +516,11 @@ features:
 """,
             encoding="utf-8",
         )
+        # !merge and !append live in the override file, not the head file.
+        # This is correct: gpu_layer.yaml owns the knowledge that its model/
+        # training keys should deep-merge rather than replace.  The head file
+        # (experiment.yaml) just composes files — it doesn't need to know each
+        # override's merge intent.
         (t / "gpu_layer.yaml").write_text(
             """
 model: !merge
@@ -528,11 +533,21 @@ features: !append
 """,
             encoding="utf-8",
         )
+        # hardware.yaml is a flat file composed under a namespace so its keys
+        # land at hardware.* without colliding with model/training.
+        (t / "hardware.yaml").write_text(
+            """
+accelerator: a100
+count: 8
+""",
+            encoding="utf-8",
+        )
         (t / "experiment.yaml").write_text(
             """
 _compose:
   - base.yaml
   - gpu_layer.yaml
+  - hardware: hardware.yaml
 run_name: orion-v1-large
 features: !append
   - wandb_logging
@@ -540,18 +555,35 @@ features: !append
             encoding="utf-8",
         )
         docs = load_namespaces(t / "experiment.yaml")
-        assert docs[0][0] == "."  # base layer at root
+        assert docs[0][0] == "."   # base layer at root
+        assert docs[2][0] == "hardware"  # hardware.yaml scoped under its namespace
         assert load(t / "experiment.yaml") == {
             "model": {"num_layers": 12, "hidden_dim": 1024},
             "training": {"batch_size": 256, "max_epochs": 20},
+            "hardware": {"accelerator": "a100", "count": 8},
             "features": ["mixed_precision", "distributed_training", "wandb_logging"],
             "run_name": "orion-v1-large",
         }
-        loaded = load(t / "experiment.yaml", schema=_ExperimentCfg)
-        assert loaded.model.num_layers == 12
-        assert loaded.training.batch_size == 256
-        assert loaded.features == ["mixed_precision", "distributed_training", "wandb_logging"]
-        assert loaded.run_name == "orion-v1-large"
-        loaded_via_legacy = load(t / "experiment.yaml", **{"as_": _ExperimentCfg})
+
+        class _HardwareCfg(PBM):
+            accelerator: str
+            count: int
+
+        class _ExperimentCfgFull(PBM):
+            model: _ModelCfg
+            training: _TrainingCfg
+            hardware: _HardwareCfg
+            features: list[str]
+            run_name: str
+
+        loaded = load(t / "experiment.yaml", schema=_ExperimentCfgFull)
+        assert loaded == _ExperimentCfgFull(
+            model=_ModelCfg(num_layers=12, hidden_dim=1024),
+            training=_TrainingCfg(batch_size=256, max_epochs=20),
+            hardware=_HardwareCfg(accelerator="a100", count=8),
+            features=["mixed_precision", "distributed_training", "wandb_logging"],
+            run_name="orion-v1-large",
+        )
+        loaded_via_legacy = load(t / "experiment.yaml", **{"as_": _ExperimentCfgFull})
         assert loaded_via_legacy == loaded
 
