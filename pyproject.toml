@@ -6,6 +6,7 @@ readme = "README.md"
 authors = [{name = "Dean Light"}]
 requires-python = ">=3.12"
 dependencies = [
+    "cyclopts>=4.11.2",
     "dynaconf>=3.2.0",
     "juplit>=0.0.7",
     "pydantic>=2.0",
