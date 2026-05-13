@@ -153,8 +153,7 @@ scope an entire file under a dotted key instead:
 _compose:
   - base.yaml
   - gpu_large.yaml
-  - path: hardware.yaml      # keys land at hardware.*, not at root
-    namespace: hardware
+  - hardware: hardware.yaml  # keys land at hardware.*, not at root
 ```
 
 `hardware.yaml` can then be a clean, self-contained document:

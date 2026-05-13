@@ -139,28 +139,31 @@ NamespaceDoc = tuple[str, dict[str, Any]]
 def _parse_compose_entry(entry: Any, compose_key: str) -> tuple[str, str]:
     """Return ``(file_path_str, namespace)`` from a ``_compose`` list entry.
 
-    Accepts either a plain path string (namespace defaults to ``"."``) or a
-    mapping with ``path`` and an optional ``namespace`` key::
+    Accepts either a plain path string (namespace ``"."``) or a single-key
+    mapping whose key is the target namespace and whose value is the file path::
 
         _compose:
-          - base.yaml                        # namespace "."
-          - path: hardware.yaml              # namespace "."
-          - path: hardware.yaml              # namespace "hardware"
-            namespace: hardware
-          - path: storage/db.yaml            # namespace "infra.storage"
-            namespace: infra.storage
+          - base.yaml                 # merged at root
+          - hardware: hardware.yaml   # merged under "hardware"
+          - infra.storage: db.yaml    # merged under "infra.storage"
     """
     if isinstance(entry, str):
         return entry, "."
     if isinstance(entry, dict):
-        if "path" not in entry:
-            raise TypeError(f"{compose_key} dict entry must have a 'path' key, got {list(entry)!r}")
-        extra = {k for k in entry if k not in ("path", "namespace")}
-        if extra:
-            raise TypeError(f"{compose_key} dict entry has unknown keys: {sorted(extra)!r}")
-        return entry["path"], entry.get("namespace", ".")
+        if len(entry) != 1:
+            raise TypeError(
+                f"{compose_key} dict entry must have exactly one key (the namespace), "
+                f"got {list(entry)!r}"
+            )
+        (namespace, path), = entry.items()
+        if not isinstance(path, str):
+            raise TypeError(
+                f"{compose_key} dict entry value must be a file path string, "
+                f"got {type(path).__name__!r}"
+            )
+        return path, str(namespace)
     raise TypeError(
-        f"{compose_key} entries must be a file path string or a {{path, namespace}} mapping, "
+        f"{compose_key} entries must be a file path string or a {{namespace: path}} mapping, "
         f"got {type(entry).__name__!r}"
     )
 
@@ -175,15 +178,12 @@ def load_namespaces(
     Load one YAML and expand `_compose` into ordered `(namespace, yaml_obj)` records.
 
     Each entry in `_compose` is either a plain path string (merged at root) or a
-    ``{path, namespace}`` mapping that scopes the included file under a dotted key::
+    single-key mapping whose key is the target namespace and value is the path::
 
         _compose:
           - base.yaml                   # merged at root
-          - path: hardware.yaml         # merged at root (explicit form)
-          - path: hardware.yaml         # merged under the "hardware" key
-            namespace: hardware
-          - path: storage/db.yaml       # merged under "infra.storage"
-            namespace: infra.storage
+          - hardware: hardware.yaml     # merged under "hardware"
+          - infra.storage: db.yaml      # merged under "infra.storage"
 
     Resolution is depth-first and cycle-checked. Namespace `"."` means root merge.
 
@@ -242,7 +242,7 @@ if test():
         t = Path(tmp_s)
         (t / "hw.yaml").write_text("gpu: a100\ncount: 8\n", encoding="utf-8")
         (t / "main.yaml").write_text(
-            "_compose:\n  - path: hw.yaml\n    namespace: hardware\na: 1\n",
+            "_compose:\n  - hardware: hw.yaml\na: 1\n",
             encoding="utf-8",
         )
         result = load_namespaces(t / "main.yaml")
@@ -392,7 +392,7 @@ if test():
         t = Path(tmp_s)
         (t / "hw.yaml").write_text("gpu: a100\ncount: 8\n", encoding="utf-8")
         (t / "main.yaml").write_text(
-            "_compose:\n  - path: hw.yaml\n    namespace: hardware\na: 1\n",
+            "_compose:\n  - hardware: hw.yaml\na: 1\n",
             encoding="utf-8",
         )
         result = load_namespaces(t / "main.yaml")

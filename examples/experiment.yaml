@@ -1,8 +1,7 @@
 _compose:
   - base.yaml
   - gpu_large.yaml
-  - path: hardware.yaml
-    namespace: hardware
+  - hardware: hardware.yaml
 
 # Experiment-level metadata — added on top of the composed layers.
 experiment:

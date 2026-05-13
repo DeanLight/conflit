@@ -16,11 +16,8 @@ them. Each entry is either a plain path string or a `{path, namespace}` mapping:
 ```yaml
 _compose:
   - base.yaml                    # merged at root
-  - path: hardware.yaml          # also merged at root (explicit form)
-  - path: hardware.yaml          # all keys land under hardware.*
-    namespace: hardware
-  - path: storage/db.yaml        # all keys land under infra.storage.*
-    namespace: infra.storage
+  - hardware: hardware.yaml      # all keys land under hardware.*
+  - infra.storage: db.yaml       # all keys land under infra.storage.*
 ```
 
 Resolution is depth-first and cycle-checked. Each loaded YAML contributes a
