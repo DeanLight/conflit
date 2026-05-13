@@ -63,7 +63,7 @@ cfg = load(Path("experiment.yaml"))
 Validate against a Pydantic model with one extra argument:
 
 ```python
-cfg = load(Path("experiment.yaml"), as_=OrionConfig)
+cfg = load(Path("experiment.yaml"), schema=OrionConfig)
 cfg.model.num_layers  # 12 — typed, IDE-autocompleted
 ```
 

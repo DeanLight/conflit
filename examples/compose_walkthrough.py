@@ -79,7 +79,7 @@ print(Pretty(final_config))
 # %% [markdown]
 # ## Validated config via Pydantic
 #
-# Pass `as_=YourModel` to `load()` and get a fully typed config object —
+# Pass `schema=YourModel` to `load()` and get a fully typed config object —
 # field access, IDE completion, and validation errors for free.
 
 # %%
@@ -129,7 +129,7 @@ class OrionConfig(BaseModel):
     features: list[str]
 
 
-cfg = load(MAIN_FILE, as_=OrionConfig)
+cfg = load(MAIN_FILE, schema=OrionConfig)
 
 print(f"\n[bold]Model:[/bold] {cfg.model.architecture} "
       f"{cfg.model.num_layers}L × {cfg.model.hidden_dim}d")

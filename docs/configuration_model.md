@@ -101,7 +101,7 @@ Supported strategy values: `override`, `merge`, `append`.
 
 ## Validation
 
-Pass `as_=YourModel` to `load()` with a Pydantic model to turn the merged dict
+Pass `schema=YourModel` to `load()` with a Pydantic model to turn the merged dict
 into a validated, typed object:
 
 ```python
@@ -116,7 +116,7 @@ class TrainingConfig(BaseModel):
 class AppConfig(BaseModel):
     training: TrainingConfig
 
-cfg = load(Path("experiment.yaml"), as_=AppConfig)
+cfg = load(Path("experiment.yaml"), schema=AppConfig)
 # cfg.training.batch_size → int, IDE-autocompleted, validated
 ```
 
@@ -124,7 +124,7 @@ If no model is provided, `load()` returns a plain `dict[str, Any]`.
 
 Validation errors from Pydantic (missing required fields, wrong types, failed
 validators) surface immediately rather than silently producing wrong runtime
-behaviour — which is the main reason to reach for `as_=` in production code.
+behaviour — which is the main reason to reach for `schema=` in production code.
 
 ---
 
@@ -138,7 +138,7 @@ CLI flags, or test fixtures without touching the YAML files:
 cfg = load(
     Path("experiment.yaml"),
     overrides={"training": {"max_epochs": 1}},
-    as_=AppConfig,
+    schema=AppConfig,
 )
 ```
 

@@ -12,7 +12,7 @@ infrastructure — anywhere you want layered config with precise merge control.
 1. Write layered YAML files — each file only contains what it changes.
 2. Declare composition order with `_compose`.
 3. Use `!merge` to deep-merge nested dicts; use `!append` to accumulate lists.
-4. Call `load()` to get a merged dict, or pass `as_=YourModel` for a validated
+4. Call `load()` to get a merged dict, or pass `schema=YourModel` for a validated
    Pydantic instance.
 
 ## Why a single YAML file is still useful
@@ -112,7 +112,7 @@ print(cfg["features"])
 
 ## 6. Validate with Pydantic
 
-Pass `as_=YourModel` to get a typed, auto-completed config object.
+Pass `schema=YourModel` to get a typed, auto-completed config object.
 Pydantic raises a clear error on missing fields or type mismatches — no
 more silent config bugs at runtime:
 
@@ -137,7 +137,7 @@ class OrionConfig(BaseModel):
     training: TrainingConfig
     features: list[str]
 
-cfg = load(Path("experiment.yaml"), as_=OrionConfig)
+cfg = load(Path("experiment.yaml"), schema=OrionConfig)
 print(cfg.model.num_layers)   # 12
 print(cfg.training.optimizer) # "adamw"
 print(cfg.features[-1])       # "wandb_logging"

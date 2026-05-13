@@ -99,10 +99,10 @@ def test_append_semantics() -> None:
 
 
 def test_pydantic_validation() -> None:
-    """load(as_=Model) returns a validated model instance with correct field values."""
+    """load(schema=Model) returns a validated model instance with correct field values."""
     import conflit
 
-    cfg = conflit.load(EXPERIMENT, as_=_OrionConfig)
+    cfg = conflit.load(EXPERIMENT, schema=_OrionConfig)
     assert isinstance(cfg, _OrionConfig)
     assert cfg.model.num_layers == 12
     assert cfg.training.batch_size == 256

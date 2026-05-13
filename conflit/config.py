@@ -364,7 +364,7 @@ def load(
     *,
     compose_key: str = "_compose",
     overrides: Mapping[str, Any] | None = None,
-    as_: type[T] | None = None,
+    schema: type[T] | None = None,
     **kwargs: Any,
 ) -> dict[str, Any] | T:
     """Load, compose, merge, and optionally validate a YAML config file.
@@ -382,18 +382,19 @@ def load(
         compose_key: Key used to declare composed files (default ``_compose``).
         overrides: Optional mapping applied as a final override layer on top of
             the composed result.
-        as_: Pydantic model class.  When supplied, the merged dict is validated
-            and the model instance is returned instead of a plain dict.
-        **kwargs: Accepts ``as`` as a legacy alias for ``as_``.
+        schema: Pydantic model class.  When supplied, the merged dict is
+            validated and the model instance is returned instead of a plain dict.
+        **kwargs: Accepts ``as_`` and ``as`` as legacy aliases for ``schema``.
 
     Returns:
-        Merged ``dict[str, Any]`` when ``as_`` is ``None``, or a validated
-        instance of ``as_`` otherwise.
+        Merged ``dict[str, Any]`` when ``schema`` is ``None``, or a validated
+        instance of ``schema`` otherwise.
     """
-    if "as" in kwargs:
-        if as_ is not None:
-            raise TypeError("Provide only one of `as_` or `as`")
-        as_ = kwargs.pop("as")
+    for legacy in ("as_", "as"):
+        if legacy in kwargs:
+            if schema is not None:
+                raise TypeError(f"Provide only one of `schema` or `{legacy}`")
+            schema = kwargs.pop(legacy)
     if kwargs:
         unknown = ", ".join(sorted(kwargs))
         raise TypeError(f"Unexpected keyword argument(s): {unknown}")
@@ -402,9 +403,9 @@ def load(
     if overrides:
         docs.append((".", dict(overrides)))
     clean = strip_conflit_markers(merge_yamls(docs))
-    if as_ is None:
+    if schema is None:
         return clean
-    return yaml_validate(clean, as_)
+    return yaml_validate(clean, schema)
 
 
 # %%
@@ -476,11 +477,11 @@ features: !append
             "features": ["mixed_precision", "distributed_training", "wandb_logging"],
             "run_name": "orion-v1-large",
         }
-        loaded = load(t / "experiment.yaml", as_=_ExperimentCfg)
+        loaded = load(t / "experiment.yaml", schema=_ExperimentCfg)
         assert loaded.model.num_layers == 12
         assert loaded.training.batch_size == 256
         assert loaded.features == ["mixed_precision", "distributed_training", "wandb_logging"]
         assert loaded.run_name == "orion-v1-large"
-        loaded_via_as_alias = load(t / "experiment.yaml", **{"as": _ExperimentCfg})
-        assert loaded_via_as_alias == loaded
+        loaded_via_legacy = load(t / "experiment.yaml", **{"as_": _ExperimentCfg})
+        assert loaded_via_legacy == loaded
 

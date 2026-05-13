@@ -30,4 +30,4 @@ Or open `compose_walkthrough.ipynb` (generate first with `poe nb`) in Jupyter.
 | Deep dict merge (`!merge`) | `gpu_large.yaml` — model, training, data, logging |
 | List accumulation (`!append`) | `gpu_large.yaml` and `experiment.yaml` — features |
 | Compose layering (`_compose`) | `experiment.yaml` |
-| Pydantic validation (`as_=`) | `compose_walkthrough.py` — `OrionConfig` |
+| Pydantic validation (`schema=`) | `compose_walkthrough.py` — `OrionConfig` |
