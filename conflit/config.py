@@ -358,20 +358,29 @@ def load(
     *,
     compose_key: str = "_compose",
     overrides: Mapping[str, Any] | None = None,
-    config_cls: type[T] | None = None,
+    as_: type[T] | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any] | T:
     """
     Main entrypoint: load, compose, merge, optional validate.
 
-    Returns merged dict when no `config_cls` is supplied.
+    Returns merged dict when no model is supplied.
     """
+    if "as" in kwargs:
+        if as_ is not None:
+            raise TypeError("Provide only one of `as_` or `as`")
+        as_ = kwargs.pop("as")
+    if kwargs:
+        unknown = ", ".join(sorted(kwargs))
+        raise TypeError(f"Unexpected keyword argument(s): {unknown}")
+
     docs = load_namespaces(Path(config_file), compose_key=compose_key)
     if overrides:
         docs.append((".", dict(overrides)))
     clean = strip_conflit_markers(merge_yamls(docs))
-    if config_cls is None:
+    if as_ is None:
         return clean
-    return yaml_validate(clean, config_cls)
+    return yaml_validate(clean, as_)
 
 
 # %%
@@ -425,6 +434,12 @@ nested: !merge
             "description": "ignored",
             "nested": {"x": 1, "y": 2},
         }
-        loaded = load(t / "main.yaml", config_cls=_Scenario)
-        assert loaded.inner.retries == 5
+        loaded = load(t / "main.yaml", as_=_Scenario)
+        assert loaded == _Scenario(
+            name="base",
+            inner=_ScenarioInner(url="http://base", retries=5),
+            nested={"x": 1, "y": 2},
+        )
+        loaded_via_as_alias = load(t / "main.yaml", **{"as": _Scenario})
+        assert loaded_via_as_alias == loaded
 
