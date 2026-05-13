@@ -1,32 +1,9 @@
 # conflit
 
-Lightweight layered YAML configuration for Python.
-
-`conflit` solves a specific problem: you have a set of YAML config files that
-should be *composed* rather than repeated. A base file holds shared defaults;
-environment or experiment files override only what changes. `conflit` merges
-them in order with precise semantics — `!merge` for nested dicts, `!append`
-for lists — and optionally validates the result against a Pydantic model.
-
-## Why conflit?
-
-Most config libraries make you choose between two bad options:
-
-- **One big file per environment.** Drift is inevitable. When the base changes,
-  every environment file needs updating. Reviewers lose the signal — what
-  actually changed?
-- **A framework with its own DSL.** You learn the framework's concepts,
-  fight its edge cases, and end up locked in.
-
-`conflit` is different: your config is just YAML. Two tags (`!merge`,
-`!append`) express how keys combine across layers, and a single `_compose`
-list declares the file order. No magic, no hidden state — you can read the
-final result in a Python shell in one line.
-
-## Quick example
+Layered YAML configuration for Python. Compose multiple config files, patch nested keys without repeating unchanged ones, accumulate lists across layers, and optionally validate the result with Pydantic.
 
 ```yaml
-# base.yaml — shared defaults
+# base.yaml
 model:
   num_layers: 6
   hidden_dim: 512
@@ -35,15 +12,15 @@ features:
 ```
 
 ```yaml
-# gpu_large.yaml — scale up without repeating unchanged keys
-model: !merge
-  num_layers: 12    # overrides base; hidden_dim is untouched
+# gpu_large.yaml — only what changes; hidden_dim is preserved
+model:
+  num_layers: 12
 features: !append
   - distributed_training
 ```
 
 ```yaml
-# experiment.yaml — compose entry point
+# experiment.yaml
 _compose:
   - base.yaml
   - gpu_large.yaml
@@ -58,42 +35,20 @@ cfg = load(Path("experiment.yaml"))
 # {"model": {"num_layers": 12, "hidden_dim": 512},
 #  "features": ["mixed_precision", "distributed_training"],
 #  "run_name": "orion-v1-large"}
-```
 
-Validate against a Pydantic model with one extra argument:
-
-```python
 cfg = load(Path("experiment.yaml"), schema=OrionConfig)
-cfg.model.num_layers  # 12 — typed, IDE-autocompleted
+cfg.model.num_layers  # 12 — typed, validated
 ```
 
-## Setup
+See [`examples/`](https://github.com/DeanLight/conflit/tree/main/examples) for the full walkthrough and [`docs/`](https://github.com/DeanLight/conflit/tree/main/docs) for the configuration model reference.
+
+## Install
 
 ```bash
-uv sync      # install dependencies
-poe init     # install git hooks
-poe nb       # generate .ipynb notebooks from .py source files
+uv sync
+poe  # list available tasks
 ```
 
-## Workflow
+## Contributing
 
-| Command | What it does |
-|---|---|
-| `poe nb` | Generate `.ipynb` files from `.py` sources (run after cloning) |
-| `poe sync` | Sync `.py` <-> `.ipynb` after editing |
-| `poe clean` | Sync then delete all `.ipynb` files |
-| `poe test` | Run tests |
-| `poe docs` | Serve docs locally |
-
-### Editing notebooks
-
-1. Edit `.py` files directly — these are the source of truth.
-2. Run `poe sync` to propagate changes to `.ipynb` notebooks.
-3. Commit only `.py` files (`.ipynb` files are gitignored).
-
-## Examples
-
-See [`examples/`](https://github.com/DeanLight/conflit/tree/main/examples) for
-the full Orion training config — a three-file compose setup demonstrating
-`!merge`, `!append`, Pydantic validation, and a notebook-style walkthrough
-that prints each step of the pipeline.
+See [CONTRIBUTING.md](CONTRIBUTING.md).

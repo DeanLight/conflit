@@ -49,10 +49,10 @@ stdlib_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
-class TaggedMerge:
-    """YAML `!merge` marker."""
+class TaggedOverride:
+    """YAML `!override` marker — explicitly replace a value instead of merging."""
 
-    mapping: dict[str, Any]
+    value: Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +62,7 @@ class TaggedAppend:
     sequence: list[Any]
 
 
-TAG_MERGE = "!merge"
+TAG_OVERRIDE = "!override"
 TAG_APPEND = "!append"
 
 
@@ -70,10 +70,12 @@ class ConflitLoader(yaml.SafeLoader):
     """SafeLoader with conflict-resolution tags."""
 
 
-def _construct_merge(loader: ConflitLoader, node: MappingNode) -> TaggedMerge:
-    if not isinstance(node, MappingNode):
-        raise ConstructorError(None, None, "!merge expects a mapping", node.start_mark)
-    return TaggedMerge(mapping=dict(loader.construct_mapping(node, deep=True)))
+def _construct_override(loader: ConflitLoader, node: yaml.Node) -> TaggedOverride:
+    if isinstance(node, MappingNode):
+        return TaggedOverride(value=dict(loader.construct_mapping(node, deep=True)))
+    if isinstance(node, SequenceNode):
+        return TaggedOverride(value=list(loader.construct_sequence(node, deep=True)))
+    return TaggedOverride(value=loader.construct_scalar(node))
 
 
 def _construct_append(loader: ConflitLoader, node: SequenceNode) -> TaggedAppend:
@@ -82,7 +84,7 @@ def _construct_append(loader: ConflitLoader, node: SequenceNode) -> TaggedAppend
     return TaggedAppend(sequence=list(loader.construct_sequence(node, deep=True)))
 
 
-yaml.add_constructor(TAG_MERGE, _construct_merge, Loader=ConflitLoader)
+yaml.add_constructor(TAG_OVERRIDE, _construct_override, Loader=ConflitLoader)
 yaml.add_constructor(TAG_APPEND, _construct_append, Loader=ConflitLoader)
 
 
@@ -114,14 +116,19 @@ def read_yaml_strict(path: Path) -> dict[str, Any]:
 if test():
     tagged = load_yaml_text(
         """
-merged: !merge
+replaced: !override
   x: 1
 items: !append
   - a
+replaced_list: !override
+  - x
+  - y
 """
     )
-    assert isinstance(tagged["merged"], TaggedMerge)
+    assert isinstance(tagged["replaced"], TaggedOverride)
     assert isinstance(tagged["items"], TaggedAppend)
+    assert isinstance(tagged["replaced_list"], TaggedOverride)
+    assert tagged["replaced_list"].value == ["x", "y"]
 
 
 if test():
@@ -256,8 +263,8 @@ class MergeStrategy(StrEnum):
 
 
 def peel_merge_strategy(value: Any) -> tuple[MergeStrategy, Any]:
-    if isinstance(value, TaggedMerge):
-        return MergeStrategy.MERGE, value.mapping
+    if isinstance(value, TaggedOverride):
+        return MergeStrategy.OVERRIDE, value.value
     if isinstance(value, TaggedAppend):
         return MergeStrategy.APPEND, value.sequence
     if isinstance(value, dict) and "_conflit" in value:
@@ -269,16 +276,19 @@ def peel_merge_strategy(value: Any) -> tuple[MergeStrategy, Any]:
         except ValueError as exc:
             raise ValueError(f"unknown _conflit strategy {raw!r}") from exc
         return strategy, {k: v for k, v in value.items() if k != "_conflit"}
-    return MergeStrategy.OVERRIDE, value
+    return MergeStrategy.MERGE, value
 
 
 if test():
-    assert peel_merge_strategy(TaggedMerge({"x": 1}))[0] is MergeStrategy.MERGE
+    assert peel_merge_strategy(TaggedOverride({"x": 1}))[0] is MergeStrategy.OVERRIDE
+    assert peel_merge_strategy(TaggedOverride(42)) == (MergeStrategy.OVERRIDE, 42)
     assert peel_merge_strategy(TaggedAppend(["a"]))[0] is MergeStrategy.APPEND
-    assert peel_merge_strategy({"_conflit": "merge", "x": 1}) == (
-        MergeStrategy.MERGE,
+    assert peel_merge_strategy({"_conflit": "override", "x": 1}) == (
+        MergeStrategy.OVERRIDE,
         {"x": 1},
     )
+    # plain dict defaults to MERGE
+    assert peel_merge_strategy({"x": 1})[0] is MergeStrategy.MERGE
 
 
 def _coerce_append_list(peeled: Any) -> list[Any]:
@@ -400,8 +410,8 @@ if test():
 
 
 def strip_conflit_markers(obj: Any) -> Any:
-    if isinstance(obj, TaggedMerge):
-        return strip_conflit_markers(obj.mapping)
+    if isinstance(obj, TaggedOverride):
+        return strip_conflit_markers(obj.value)
     if isinstance(obj, TaggedAppend):
         return [strip_conflit_markers(x) for x in obj.sequence]
     if isinstance(obj, dict):
@@ -412,8 +422,9 @@ def strip_conflit_markers(obj: Any) -> Any:
 
 
 if test():
-    assert strip_conflit_markers({"a": TaggedMerge({"b": 1})}) == {"a": {"b": 1}}
-    assert strip_conflit_markers({"x": {"_conflit": "merge", "y": 2}}) == {"x": {"y": 2}}
+    assert strip_conflit_markers({"a": TaggedOverride({"b": 1})}) == {"a": {"b": 1}}
+    assert strip_conflit_markers({"a": TaggedOverride([1, 2])}) == {"a": [1, 2]}
+    assert strip_conflit_markers({"x": {"_conflit": "override", "y": 2}}) == {"x": {"y": 2}}
 
 
 def yaml_validate(obj: Mapping[str, Any], config_cls: type[T]) -> T:
@@ -481,8 +492,9 @@ def load(
 # %%
 if test():
     # End-to-end: mirrors the examples/ Orion training config story.
-    # base.yaml sets model defaults; gpu_layer.yaml deep-merges overrides and
-    # appends features; experiment.yaml composes both and adds metadata.
+    # base.yaml sets defaults; gpu_layer.yaml patches them (dicts merge by
+    # default — no !merge needed) and appends feature flags; experiment.yaml
+    # composes both, scopes hardware.yaml under a namespace, and adds metadata.
     import tempfile
 
     from pydantic import BaseModel as PBM
@@ -494,12 +506,6 @@ if test():
     class _TrainingCfg(PBM):
         batch_size: int
         max_epochs: int
-
-    class _ExperimentCfg(PBM):
-        model: _ModelCfg
-        training: _TrainingCfg
-        features: list[str]
-        run_name: str
 
     with tempfile.TemporaryDirectory() as tmp_s:
         t = Path(tmp_s)
@@ -516,17 +522,16 @@ features:
 """,
             encoding="utf-8",
         )
-        # !merge and !append live in the override file, not the head file.
-        # This is correct: gpu_layer.yaml owns the knowledge that its model/
-        # training keys should deep-merge rather than replace.  The head file
-        # (experiment.yaml) just composes files — it doesn't need to know each
-        # override's merge intent.
+        # Dicts merge by default — no tag needed. gpu_layer.yaml only lists
+        # keys it changes; hidden_dim from base.yaml is preserved automatically.
+        # !append is still explicit because list accumulation is intentional.
+        # !override would be needed only if we wanted to replace a whole dict.
         (t / "gpu_layer.yaml").write_text(
             """
-model: !merge
+model:
   num_layers: 12
   hidden_dim: 1024
-training: !merge
+training:
   batch_size: 256
 features: !append
   - distributed_training

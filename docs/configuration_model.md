@@ -11,7 +11,7 @@
 ## `_compose` behavior
 
 `_compose` is a list of entries resolved relative to the file that declares
-them. Each entry is either a plain path string or a `{path, namespace}` mapping:
+them. Each entry is either a plain path string or a `{namespace: path}` mapping:
 
 ```yaml
 _compose:
@@ -34,40 +34,44 @@ with model or training keys.
 
 ## Merge semantics
 
-### Default behaviour: override
+### Default behaviour: deep merge
 
-When no tag is present, an incoming value replaces whatever was at that key.
-Use this for scalar values (strings, numbers, booleans) that a later layer
-should simply swap out.
+When no tag is present, dicts are **recursively merged** — only the keys
+present in the overlay are updated, sibling keys from earlier layers are
+preserved. Scalars replace (merging a scalar is the same as replacing it).
 
 ```yaml
 # base.yaml
 training:
+  optimizer: adamw
+  batch_size: 32
   max_epochs: 20
 
-# gpu_large.yaml — replaces the whole training mapping
+# gpu_large.yaml — patches two keys; optimizer and max_epochs come from base
 training:
-  max_epochs: 100
   batch_size: 256
+  max_epochs: 100
 ```
 
-### `!merge` — recursive dict merge
+Result: `training: {optimizer: adamw, batch_size: 256, max_epochs: 100}`.
 
-Use `!merge` when you want to update *some* keys inside a nested dict without
-having to repeat the ones you are not changing:
+### `!override` — explicit replacement
+
+Use `!override` when you want to **replace** an entire value — a nested dict,
+a list, or a scalar — discarding whatever the earlier layers set:
 
 ```yaml
-# gpu_large.yaml — only touches batch_size; max_epochs comes from base.yaml
-training: !merge
-  batch_size: 256
+# gpu_large.yaml — throw away base logging config entirely
+logging: !override
+  level: warning
+  log_every_n_steps: 200
 ```
 
-`!merge` is only meaningful on mappings. Applying it to a scalar or list raises
-an error.
+`!override` works on mappings, sequences, and scalars.
 
 ### `!append` — list accumulation
 
-Use `!append` when a list should grow across layers rather than be replaced.
+Use `!append` when a list should **grow** across layers rather than be replaced.
 A common pattern is a feature-flag list that base configs seed and environment
 configs extend:
 
@@ -97,7 +101,7 @@ application if needed).
 
 ```yaml
 training:
-  _conflit: merge
+  _conflit: override
   batch_size: 256
 ```
 
@@ -148,4 +152,4 @@ cfg = load(
 )
 ```
 
-`overrides` follows default (override) semantics — it replaces, not merges.
+`overrides` is merged using the same default deep-merge semantics.

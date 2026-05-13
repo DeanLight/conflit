@@ -30,8 +30,9 @@ Or open `compose_walkthrough.ipynb` (generate first with `poe nb`) in Jupyter.
 | Feature | Where |
 |---|---|
 | Baseline defaults | `base.yaml` |
-| Deep dict merge (`!merge`) | `gpu_large.yaml` — model, training, data, logging |
+| Default deep merge | `gpu_large.yaml` — dicts patch automatically, no tag needed |
 | List accumulation (`!append`) | `gpu_large.yaml` and `experiment.yaml` — features |
-| Namespace routing (`namespace:`) | `experiment.yaml` — `hardware.yaml` scoped under `hardware.*` |
+| Explicit replace (`!override`) | use on any value to discard earlier layers |
+| Namespace routing | `experiment.yaml` — `hardware.yaml` scoped under `hardware.*` |
 | Compose layering (`_compose`) | `experiment.yaml` |
 | Pydantic validation (`schema=`) | `compose_walkthrough.py` — `OrionConfig` |
