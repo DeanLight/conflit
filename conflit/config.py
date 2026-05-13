@@ -43,6 +43,8 @@ from yaml.nodes import MappingNode, SequenceNode
 
 T = TypeVar("T", bound=BaseModel)
 log = structlog.stdlib.get_logger(__name__)
+# stdlib logger used only to guard structlog calls; avoids structlog overhead
+# when DEBUG is off, since structlog does not short-circuit before formatting.
 stdlib_log = logging.getLogger(__name__)
 
 
@@ -68,13 +70,13 @@ class ConflitLoader(yaml.SafeLoader):
     """SafeLoader with conflict-resolution tags."""
 
 
-def _construct_merge(loader: yaml.Loader, node: MappingNode) -> TaggedMerge:
+def _construct_merge(loader: ConflitLoader, node: MappingNode) -> TaggedMerge:
     if not isinstance(node, MappingNode):
         raise ConstructorError(None, None, "!merge expects a mapping", node.start_mark)
     return TaggedMerge(mapping=dict(loader.construct_mapping(node, deep=True)))
 
 
-def _construct_append(loader: yaml.Loader, node: SequenceNode) -> TaggedAppend:
+def _construct_append(loader: ConflitLoader, node: SequenceNode) -> TaggedAppend:
     if not isinstance(node, SequenceNode):
         raise ConstructorError(None, None, "!append expects a sequence", node.start_mark)
     return TaggedAppend(sequence=list(loader.construct_sequence(node, deep=True)))
@@ -238,11 +240,7 @@ def _coerce_append_list(peeled: Any) -> list[Any]:
     raise TypeError(f"append expects list payload, got {type(peeled).__name__}")
 
 
-class _Miss:
-    ...
-
-
-_MISSING = _Miss()
+_MISSING = object()
 
 
 def _merge_dict(base: dict[str, Any], overlay: Mapping[str, Any], *, path: str = ".") -> None:
@@ -349,8 +347,16 @@ if test():
 
 
 def yaml_validate(obj: Mapping[str, Any], config_cls: type[T]) -> T:
-    """Validate merged YAML dict against a Pydantic model class."""
-    return config_cls.model_validate(strip_conflit_markers(dict(obj)))
+    """Validate a merged YAML dict against a Pydantic model class.
+
+    Args:
+        obj: Merged config dict, already stripped of conflit markers.
+        config_cls: Pydantic model class to validate against.
+
+    Returns:
+        Validated instance of ``config_cls``.
+    """
+    return config_cls.model_validate(dict(obj))
 
 
 def load(
@@ -361,10 +367,28 @@ def load(
     as_: type[T] | None = None,
     **kwargs: Any,
 ) -> dict[str, Any] | T:
-    """
-    Main entrypoint: load, compose, merge, optional validate.
+    """Load, compose, merge, and optionally validate a YAML config file.
 
-    Returns merged dict when no model is supplied.
+    The three-phase pipeline is:
+
+    1. **Expand** — recursively resolve ``_compose`` entries depth-first into
+       ordered ``(namespace, payload)`` pairs.
+    2. **Merge** — fold pairs into one dict using override / ``!merge`` /
+       ``!append`` semantics.
+    3. **Validate** (optional) — pass the merged dict through a Pydantic model.
+
+    Args:
+        config_file: Path to the top-level YAML file (may contain ``_compose``).
+        compose_key: Key used to declare composed files (default ``_compose``).
+        overrides: Optional mapping applied as a final override layer on top of
+            the composed result.
+        as_: Pydantic model class.  When supplied, the merged dict is validated
+            and the model instance is returned instead of a plain dict.
+        **kwargs: Accepts ``as`` as a legacy alias for ``as_``.
+
+    Returns:
+        Merged ``dict[str, Any]`` when ``as_`` is ``None``, or a validated
+        instance of ``as_`` otherwise.
     """
     if "as" in kwargs:
         if as_ is not None:
@@ -385,61 +409,78 @@ def load(
 
 # %%
 if test():
+    # End-to-end: mirrors the examples/ Orion training config story.
+    # base.yaml sets model defaults; gpu_layer.yaml deep-merges overrides and
+    # appends features; experiment.yaml composes both and adds metadata.
     import tempfile
 
     from pydantic import BaseModel as PBM
-    from pydantic import Field
 
-    class _ScenarioInner(PBM):
-        url: str = "http://default"
-        retries: int = 3
+    class _ModelCfg(PBM):
+        num_layers: int
+        hidden_dim: int
 
-    class _Scenario(PBM):
-        name: str = "unspecified"
-        value: int = 0
-        inner: _ScenarioInner = _ScenarioInner()
-        nested: dict[str, int] = Field(default_factory=dict)
+    class _TrainingCfg(PBM):
+        batch_size: int
+        max_epochs: int
+
+    class _ExperimentCfg(PBM):
+        model: _ModelCfg
+        training: _TrainingCfg
+        features: list[str]
+        run_name: str
 
     with tempfile.TemporaryDirectory() as tmp_s:
         t = Path(tmp_s)
         (t / "base.yaml").write_text(
-            yaml.safe_dump({"name": "base", "inner": {"url": "http://base", "retries": 1}}),
-            encoding="utf-8",
-        )
-        (t / "overlay.yaml").write_text(
             """
-inner: !merge
-  retries: 5
-nested: !merge
-  x: 1
+model:
+  num_layers: 6
+  hidden_dim: 512
+training:
+  batch_size: 32
+  max_epochs: 20
+features:
+  - mixed_precision
 """,
             encoding="utf-8",
         )
-        (t / "main.yaml").write_text(
+        (t / "gpu_layer.yaml").write_text(
+            """
+model: !merge
+  num_layers: 12
+  hidden_dim: 1024
+training: !merge
+  batch_size: 256
+features: !append
+  - distributed_training
+""",
+            encoding="utf-8",
+        )
+        (t / "experiment.yaml").write_text(
             """
 _compose:
   - base.yaml
-  - overlay.yaml
-description: ignored
-nested: !merge
-  y: 2
+  - gpu_layer.yaml
+run_name: orion-v1-large
+features: !append
+  - wandb_logging
 """,
             encoding="utf-8",
         )
-        docs = load_namespaces(t / "main.yaml")
-        assert docs[0][0] == "."
-        assert load(t / "main.yaml") == {
-            "name": "base",
-            "inner": {"url": "http://base", "retries": 5},
-            "description": "ignored",
-            "nested": {"x": 1, "y": 2},
+        docs = load_namespaces(t / "experiment.yaml")
+        assert docs[0][0] == "."  # base layer at root
+        assert load(t / "experiment.yaml") == {
+            "model": {"num_layers": 12, "hidden_dim": 1024},
+            "training": {"batch_size": 256, "max_epochs": 20},
+            "features": ["mixed_precision", "distributed_training", "wandb_logging"],
+            "run_name": "orion-v1-large",
         }
-        loaded = load(t / "main.yaml", as_=_Scenario)
-        assert loaded == _Scenario(
-            name="base",
-            inner=_ScenarioInner(url="http://base", retries=5),
-            nested={"x": 1, "y": 2},
-        )
-        loaded_via_as_alias = load(t / "main.yaml", **{"as": _Scenario})
+        loaded = load(t / "experiment.yaml", as_=_ExperimentCfg)
+        assert loaded.model.num_layers == 12
+        assert loaded.training.batch_size == 256
+        assert loaded.features == ["mixed_precision", "distributed_training", "wandb_logging"]
+        assert loaded.run_name == "orion-v1-large"
+        loaded_via_as_alias = load(t / "experiment.yaml", **{"as": _ExperimentCfg})
         assert loaded_via_as_alias == loaded
 

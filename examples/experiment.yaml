@@ -1,0 +1,15 @@
+_compose:
+  - base.yaml
+  - gpu_large.yaml
+
+# Experiment-level metadata — added on top of the composed layers.
+experiment:
+  name: orion-v1-large
+  seed: 42
+  tags:
+    - baseline
+    - gpu-large
+
+# Append experiment-specific feature flags on top of what the GPU layer added.
+features: !append
+  - wandb_logging
