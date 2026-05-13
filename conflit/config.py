@@ -43,6 +43,8 @@ from yaml.nodes import MappingNode, SequenceNode
 
 T = TypeVar("T", bound=BaseModel)
 log = structlog.stdlib.get_logger(__name__)
+# stdlib logger used only to guard structlog calls; avoids structlog overhead
+# when DEBUG is off, since structlog does not short-circuit before formatting.
 stdlib_log = logging.getLogger(__name__)
 
 
@@ -68,13 +70,13 @@ class ConflitLoader(yaml.SafeLoader):
     """SafeLoader with conflict-resolution tags."""
 
 
-def _construct_merge(loader: yaml.Loader, node: MappingNode) -> TaggedMerge:
+def _construct_merge(loader: ConflitLoader, node: MappingNode) -> TaggedMerge:
     if not isinstance(node, MappingNode):
         raise ConstructorError(None, None, "!merge expects a mapping", node.start_mark)
     return TaggedMerge(mapping=dict(loader.construct_mapping(node, deep=True)))
 
 
-def _construct_append(loader: yaml.Loader, node: SequenceNode) -> TaggedAppend:
+def _construct_append(loader: ConflitLoader, node: SequenceNode) -> TaggedAppend:
     if not isinstance(node, SequenceNode):
         raise ConstructorError(None, None, "!append expects a sequence", node.start_mark)
     return TaggedAppend(sequence=list(loader.construct_sequence(node, deep=True)))
@@ -134,6 +136,38 @@ if test():
 NamespaceDoc = tuple[str, dict[str, Any]]
 
 
+def _parse_compose_entry(entry: Any, compose_key: str) -> tuple[str, str]:
+    """Return ``(file_path_str, namespace)`` from a ``_compose`` list entry.
+
+    Accepts either a plain path string (namespace ``"."``) or a single-key
+    mapping whose key is the target namespace and whose value is the file path::
+
+        _compose:
+          - base.yaml                 # merged at root
+          - hardware: hardware.yaml   # merged under "hardware"
+          - infra.storage: db.yaml    # merged under "infra.storage"
+    """
+    if isinstance(entry, str):
+        return entry, "."
+    if isinstance(entry, dict):
+        if len(entry) != 1:
+            raise TypeError(
+                f"{compose_key} dict entry must have exactly one key (the namespace), "
+                f"got {list(entry)!r}"
+            )
+        (namespace, path), = entry.items()
+        if not isinstance(path, str):
+            raise TypeError(
+                f"{compose_key} dict entry value must be a file path string, "
+                f"got {type(path).__name__!r}"
+            )
+        return path, str(namespace)
+    raise TypeError(
+        f"{compose_key} entries must be a file path string or a {{namespace: path}} mapping, "
+        f"got {type(entry).__name__!r}"
+    )
+
+
 def load_namespaces(
     path: Path,
     *,
@@ -143,10 +177,15 @@ def load_namespaces(
     """
     Load one YAML and expand `_compose` into ordered `(namespace, yaml_obj)` records.
 
-    Rules:
-    - Namespace `"."` means root merge.
-    - `_compose` is a list of YAML file paths.
-    - Resolution is depth-first: children first, then current document body.
+    Each entry in `_compose` is either a plain path string (merged at root) or a
+    single-key mapping whose key is the target namespace and value is the path::
+
+        _compose:
+          - base.yaml                   # merged at root
+          - hardware: hardware.yaml     # merged under "hardware"
+          - infra.storage: db.yaml      # merged under "infra.storage"
+
+    Resolution is depth-first and cycle-checked. Namespace `"."` means root merge.
 
     Args:
         path: YAML file to load.
@@ -167,14 +206,20 @@ def load_namespaces(
     if raw_compose is not None:
         if not isinstance(raw_compose, list):
             raise TypeError(f"{compose_key} must be a list")
-        for include_path in raw_compose:
-            if not isinstance(include_path, str):
-                raise TypeError(f"{compose_key} entries must be file paths (strings)")
-            include_abs = Path(include_path)
+        for entry in raw_compose:
+            include_str, namespace = _parse_compose_entry(entry, compose_key)
+            include_abs = Path(include_str)
             include_abs = (
-                include_abs.resolve() if include_abs.is_absolute() else (canon.parent / include_abs).resolve()
+                include_abs.resolve() if include_abs.is_absolute() else (canon.parent / include_str).resolve()
             )
-            docs.extend(load_namespaces(include_abs, compose_key=compose_key, stack=(*stack, canon)))
+            child_docs = load_namespaces(include_abs, compose_key=compose_key, stack=(*stack, canon))
+            if namespace == ".":
+                docs.extend(child_docs)
+            else:
+                # Wrap every child namespace under the declared namespace prefix.
+                for child_ns, payload in child_docs:
+                    combined = namespace if child_ns == "." else f"{namespace}.{child_ns}"
+                    docs.append((combined, payload))
 
     docs.append((".", {k: v for k, v in raw.items() if k != compose_key}))
     return docs
@@ -188,6 +233,20 @@ if test():
         (t / "base.yaml").write_text("a: 1\n", encoding="utf-8")
         (t / "main.yaml").write_text("_compose:\n  - base.yaml\nb: 2\n", encoding="utf-8")
         assert load_namespaces(t / "main.yaml") == [(".", {"a": 1}), (".", {"b": 2})]
+
+
+if test():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp_s:
+        t = Path(tmp_s)
+        (t / "hw.yaml").write_text("gpu: a100\ncount: 8\n", encoding="utf-8")
+        (t / "main.yaml").write_text(
+            "_compose:\n  - hardware: hw.yaml\na: 1\n",
+            encoding="utf-8",
+        )
+        result = load_namespaces(t / "main.yaml")
+        assert result == [("hardware", {"gpu": "a100", "count": 8}), (".", {"a": 1})]
 
 
 class MergeStrategy(StrEnum):
@@ -238,11 +297,7 @@ def _coerce_append_list(peeled: Any) -> list[Any]:
     raise TypeError(f"append expects list payload, got {type(peeled).__name__}")
 
 
-class _Miss:
-    ...
-
-
-_MISSING = _Miss()
+_MISSING = object()
 
 
 def _merge_dict(base: dict[str, Any], overlay: Mapping[str, Any], *, path: str = ".") -> None:
@@ -330,6 +385,19 @@ if test():
         "tags": ["a", "b"]
     }
 
+if test():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp_s:
+        t = Path(tmp_s)
+        (t / "hw.yaml").write_text("gpu: a100\ncount: 8\n", encoding="utf-8")
+        (t / "main.yaml").write_text(
+            "_compose:\n  - hardware: hw.yaml\na: 1\n",
+            encoding="utf-8",
+        )
+        result = load_namespaces(t / "main.yaml")
+        assert merge_yamls(result) == {"hardware": {"gpu": "a100", "count": 8}, "a": 1}
+
 
 def strip_conflit_markers(obj: Any) -> Any:
     if isinstance(obj, TaggedMerge):
@@ -349,8 +417,16 @@ if test():
 
 
 def yaml_validate(obj: Mapping[str, Any], config_cls: type[T]) -> T:
-    """Validate merged YAML dict against a Pydantic model class."""
-    return config_cls.model_validate(strip_conflit_markers(dict(obj)))
+    """Validate a merged YAML dict against a Pydantic model class.
+
+    Args:
+        obj: Merged config dict, already stripped of conflit markers.
+        config_cls: Pydantic model class to validate against.
+
+    Returns:
+        Validated instance of ``config_cls``.
+    """
+    return config_cls.model_validate(dict(obj))
 
 
 def load(
@@ -358,18 +434,37 @@ def load(
     *,
     compose_key: str = "_compose",
     overrides: Mapping[str, Any] | None = None,
-    as_: type[T] | None = None,
+    schema: type[T] | None = None,
     **kwargs: Any,
 ) -> dict[str, Any] | T:
-    """
-    Main entrypoint: load, compose, merge, optional validate.
+    """Load, compose, merge, and optionally validate a YAML config file.
 
-    Returns merged dict when no model is supplied.
+    The three-phase pipeline is:
+
+    1. **Expand** — recursively resolve ``_compose`` entries depth-first into
+       ordered ``(namespace, payload)`` pairs.
+    2. **Merge** — fold pairs into one dict using override / ``!merge`` /
+       ``!append`` semantics.
+    3. **Validate** (optional) — pass the merged dict through a Pydantic model.
+
+    Args:
+        config_file: Path to the top-level YAML file (may contain ``_compose``).
+        compose_key: Key used to declare composed files (default ``_compose``).
+        overrides: Optional mapping applied as a final override layer on top of
+            the composed result.
+        schema: Pydantic model class.  When supplied, the merged dict is
+            validated and the model instance is returned instead of a plain dict.
+        **kwargs: Accepts ``as_`` and ``as`` as legacy aliases for ``schema``.
+
+    Returns:
+        Merged ``dict[str, Any]`` when ``schema`` is ``None``, or a validated
+        instance of ``schema`` otherwise.
     """
-    if "as" in kwargs:
-        if as_ is not None:
-            raise TypeError("Provide only one of `as_` or `as`")
-        as_ = kwargs.pop("as")
+    for legacy in ("as_", "as"):
+        if legacy in kwargs:
+            if schema is not None:
+                raise TypeError(f"Provide only one of `schema` or `{legacy}`")
+            schema = kwargs.pop(legacy)
     if kwargs:
         unknown = ", ".join(sorted(kwargs))
         raise TypeError(f"Unexpected keyword argument(s): {unknown}")
@@ -378,68 +473,117 @@ def load(
     if overrides:
         docs.append((".", dict(overrides)))
     clean = strip_conflit_markers(merge_yamls(docs))
-    if as_ is None:
+    if schema is None:
         return clean
-    return yaml_validate(clean, as_)
+    return yaml_validate(clean, schema)
 
 
 # %%
 if test():
+    # End-to-end: mirrors the examples/ Orion training config story.
+    # base.yaml sets model defaults; gpu_layer.yaml deep-merges overrides and
+    # appends features; experiment.yaml composes both and adds metadata.
     import tempfile
 
     from pydantic import BaseModel as PBM
-    from pydantic import Field
 
-    class _ScenarioInner(PBM):
-        url: str = "http://default"
-        retries: int = 3
+    class _ModelCfg(PBM):
+        num_layers: int
+        hidden_dim: int
 
-    class _Scenario(PBM):
-        name: str = "unspecified"
-        value: int = 0
-        inner: _ScenarioInner = _ScenarioInner()
-        nested: dict[str, int] = Field(default_factory=dict)
+    class _TrainingCfg(PBM):
+        batch_size: int
+        max_epochs: int
+
+    class _ExperimentCfg(PBM):
+        model: _ModelCfg
+        training: _TrainingCfg
+        features: list[str]
+        run_name: str
 
     with tempfile.TemporaryDirectory() as tmp_s:
         t = Path(tmp_s)
         (t / "base.yaml").write_text(
-            yaml.safe_dump({"name": "base", "inner": {"url": "http://base", "retries": 1}}),
-            encoding="utf-8",
-        )
-        (t / "overlay.yaml").write_text(
             """
-inner: !merge
-  retries: 5
-nested: !merge
-  x: 1
+model:
+  num_layers: 6
+  hidden_dim: 512
+training:
+  batch_size: 32
+  max_epochs: 20
+features:
+  - mixed_precision
 """,
             encoding="utf-8",
         )
-        (t / "main.yaml").write_text(
+        # !merge and !append live in the override file, not the head file.
+        # This is correct: gpu_layer.yaml owns the knowledge that its model/
+        # training keys should deep-merge rather than replace.  The head file
+        # (experiment.yaml) just composes files — it doesn't need to know each
+        # override's merge intent.
+        (t / "gpu_layer.yaml").write_text(
+            """
+model: !merge
+  num_layers: 12
+  hidden_dim: 1024
+training: !merge
+  batch_size: 256
+features: !append
+  - distributed_training
+""",
+            encoding="utf-8",
+        )
+        # hardware.yaml is a flat file composed under a namespace so its keys
+        # land at hardware.* without colliding with model/training.
+        (t / "hardware.yaml").write_text(
+            """
+accelerator: a100
+count: 8
+""",
+            encoding="utf-8",
+        )
+        (t / "experiment.yaml").write_text(
             """
 _compose:
   - base.yaml
-  - overlay.yaml
-description: ignored
-nested: !merge
-  y: 2
+  - gpu_layer.yaml
+  - hardware: hardware.yaml
+run_name: orion-v1-large
+features: !append
+  - wandb_logging
 """,
             encoding="utf-8",
         )
-        docs = load_namespaces(t / "main.yaml")
-        assert docs[0][0] == "."
-        assert load(t / "main.yaml") == {
-            "name": "base",
-            "inner": {"url": "http://base", "retries": 5},
-            "description": "ignored",
-            "nested": {"x": 1, "y": 2},
+        docs = load_namespaces(t / "experiment.yaml")
+        assert docs[0][0] == "."   # base layer at root
+        assert docs[2][0] == "hardware"  # hardware.yaml scoped under its namespace
+        assert load(t / "experiment.yaml") == {
+            "model": {"num_layers": 12, "hidden_dim": 1024},
+            "training": {"batch_size": 256, "max_epochs": 20},
+            "hardware": {"accelerator": "a100", "count": 8},
+            "features": ["mixed_precision", "distributed_training", "wandb_logging"],
+            "run_name": "orion-v1-large",
         }
-        loaded = load(t / "main.yaml", as_=_Scenario)
-        assert loaded == _Scenario(
-            name="base",
-            inner=_ScenarioInner(url="http://base", retries=5),
-            nested={"x": 1, "y": 2},
+
+        class _HardwareCfg(PBM):
+            accelerator: str
+            count: int
+
+        class _ExperimentCfgFull(PBM):
+            model: _ModelCfg
+            training: _TrainingCfg
+            hardware: _HardwareCfg
+            features: list[str]
+            run_name: str
+
+        loaded = load(t / "experiment.yaml", schema=_ExperimentCfgFull)
+        assert loaded == _ExperimentCfgFull(
+            model=_ModelCfg(num_layers=12, hidden_dim=1024),
+            training=_TrainingCfg(batch_size=256, max_epochs=20),
+            hardware=_HardwareCfg(accelerator="a100", count=8),
+            features=["mixed_precision", "distributed_training", "wandb_logging"],
+            run_name="orion-v1-large",
         )
-        loaded_via_as_alias = load(t / "main.yaml", **{"as": _Scenario})
-        assert loaded_via_as_alias == loaded
+        loaded_via_legacy = load(t / "experiment.yaml", **{"as_": _ExperimentCfgFull})
+        assert loaded_via_legacy == loaded
 

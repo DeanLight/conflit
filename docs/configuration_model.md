@@ -10,51 +10,95 @@
 
 ## `_compose` behavior
 
-`_compose` is a list of YAML file paths:
+`_compose` is a list of entries resolved relative to the file that declares
+them. Each entry is either a plain path string or a `{path, namespace}` mapping:
 
 ```yaml
 _compose:
-  - defaults.yaml
-  - production.yaml
+  - base.yaml                    # merged at root
+  - hardware: hardware.yaml      # all keys land under hardware.*
+  - infra.storage: db.yaml       # all keys land under infra.storage.*
 ```
 
-Resolution is depth-first and cycle-checked. Each loaded YAML contributes a namespace/object pair where namespace `"."` means root merge.
+Resolution is depth-first and cycle-checked. Each loaded YAML contributes a
+`(namespace, payload)` pair — namespace `"."` means root merge. The current
+file's own keys are merged last, so it acts as the final override layer on top
+of everything it composes.
+
+Namespace routing is useful when a config file is written as a flat document
+but you want it to live under a specific key in the merged result — for example,
+composing a standalone `hardware.yaml` under `hardware` so it never collides
+with model or training keys.
 
 ---
 
 ## Merge semantics
 
-### Default behavior (override)
+### Default behaviour: override
 
-If no tag is present, incoming values override existing values at the key.
-
-### `!merge` for mappings
-
-```yaml
-service: !merge
-  retries: 5
-```
-
-Recursively merges mapping keys into existing mapping values.
-
-### `!append` for lists
+When no tag is present, an incoming value replaces whatever was at that key.
+Use this for scalar values (strings, numbers, booleans) that a later layer
+should simply swap out.
 
 ```yaml
-tags: !append
-  - prod
-  - metrics
+# base.yaml
+training:
+  max_epochs: 20
+
+# gpu_large.yaml — replaces the whole training mapping
+training:
+  max_epochs: 100
+  batch_size: 256
 ```
 
-Appends incoming list items onto the existing list.
+### `!merge` — recursive dict merge
+
+Use `!merge` when you want to update *some* keys inside a nested dict without
+having to repeat the ones you are not changing:
+
+```yaml
+# gpu_large.yaml — only touches batch_size; max_epochs comes from base.yaml
+training: !merge
+  batch_size: 256
+```
+
+`!merge` is only meaningful on mappings. Applying it to a scalar or list raises
+an error.
+
+### `!append` — list accumulation
+
+Use `!append` when a list should grow across layers rather than be replaced.
+A common pattern is a feature-flag list that base configs seed and environment
+configs extend:
+
+```yaml
+# base.yaml
+features:
+  - mixed_precision
+
+# gpu_large.yaml — extends, does not replace
+features: !append
+  - distributed_training
+  - compile_model
+
+# experiment.yaml — extends again
+features: !append
+  - wandb_logging
+```
+
+The final `features` list will be
+`["mixed_precision", "distributed_training", "compile_model", "wandb_logging"]`
+— order preserved, no duplicates removed (deduplication is left to the
+application if needed).
 
 ### Legacy `_conflit` key
 
-`_conflit` is still recognized for compatibility:
+`_conflit` is still recognised for compatibility:
 
 ```yaml
-service:
+training:
   _conflit: merge
-  retries: 5
+  batch_size: 256
 ```
 
 Supported strategy values: `override`, `merge`, `append`.
@@ -63,17 +107,45 @@ Supported strategy values: `override`, `merge`, `append`.
 
 ## Validation
 
-Pass `as_` (or `as` alias) to `load(...)` with a Pydantic model:
+Pass `schema=YourModel` to `load()` with a Pydantic model to turn the merged dict
+into a validated, typed object:
 
 ```python
 from pathlib import Path
 from pydantic import BaseModel
 from conflit import load
 
-class AppConfig(BaseModel):
-    name: str
+class TrainingConfig(BaseModel):
+    optimizer: str
+    batch_size: int
 
-cfg = load(Path("main.yaml"), as_=AppConfig)
+class AppConfig(BaseModel):
+    training: TrainingConfig
+
+cfg = load(Path("experiment.yaml"), schema=AppConfig)
+# cfg.training.batch_size → int, IDE-autocompleted, validated
 ```
 
-If no model is provided, `load(...)` returns a merged dictionary.
+If no model is provided, `load()` returns a plain `dict[str, Any]`.
+
+Validation errors from Pydantic (missing required fields, wrong types, failed
+validators) surface immediately rather than silently producing wrong runtime
+behaviour — which is the main reason to reach for `schema=` in production code.
+
+---
+
+## Programmatic overrides
+
+The `overrides` parameter applies an additional dict on top of the composed
+result before validation. This is useful for injecting environment variables,
+CLI flags, or test fixtures without touching the YAML files:
+
+```python
+cfg = load(
+    Path("experiment.yaml"),
+    overrides={"training": {"max_epochs": 1}},
+    schema=AppConfig,
+)
+```
+
+`overrides` follows default (override) semantics — it replaces, not merges.
