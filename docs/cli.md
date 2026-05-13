@@ -104,13 +104,6 @@ def run(
 3. Keyword arguments to `load_cli_config` — typically values from positional
    args or typed cyclopts flags. Nested dicts are deep-merged.
 
-## Why no built-in `--var` / plugin API?
-
-Cyclopts already gives you typed flags, help formatting, completion, and
-subcommands. A `@main.flag("--readvar")` registration API on top of conflit
-would be strictly less powerful, so we keep the surface small: parse `--set`,
-deep-merge, call `load`. When you need more, cyclopts is right there.
-
 ## Walkthrough
 
 A runnable notebook with both patterns lives in

@@ -30,7 +30,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Annotated, Any, TypeVar
 
@@ -39,7 +39,7 @@ from cyclopts import App, Parameter
 from juplit import test
 from pydantic import BaseModel
 
-from conflit.config import load
+from conflit.config import load, merge_yamls
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -125,16 +125,6 @@ if test():
 # entry point stays short.
 
 # %%
-def _deep_merge_into(dst: dict[str, Any], src: Mapping[str, Any]) -> dict[str, Any]:
-    """Recursively merge ``src`` into ``dst``. Scalars and lists in ``src`` win."""
-    for k, v in src.items():
-        if isinstance(v, Mapping) and isinstance(dst.get(k), dict):
-            _deep_merge_into(dst[k], v)
-        else:
-            dst[k] = v
-    return dst
-
-
 def load_cli_config(
     main_config: Path,
     *,
@@ -152,6 +142,10 @@ def load_cli_config(
     3. Keyword ``extra_overrides`` (typically values from typed cyclopts flags
        or positional arguments).
 
+    The two override sources are combined using :func:`conflit.config.merge_yamls`,
+    so deep-merge / ``!override`` / ``!append`` semantics are consistent with the
+    YAML stack itself.
+
     Args:
         main_config: Path to the top-level YAML config.
         set_: Iterable of ``"key=value"`` or ``"a.b=value"`` strings from a
@@ -164,9 +158,8 @@ def load_cli_config(
     Returns:
         Merged ``dict`` (when ``schema`` is ``None``) or a validated model instance.
     """
-    overrides: dict[str, Any] = parse_dotted_overrides(set_)
-    if extra_overrides:
-        _deep_merge_into(overrides, extra_overrides)
+    set_overrides = parse_dotted_overrides(set_)
+    overrides = merge_yamls([(".", set_overrides), (".", extra_overrides)])
     return load(
         main_config,
         compose_key=compose_key,
