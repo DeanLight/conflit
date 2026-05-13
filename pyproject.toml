@@ -1,7 +1,8 @@
 [project]
 name = "conflit"
-version = "0.1.0"
+version = "0.1.1"
 description = "lightweight configuration management library"
+readme = "README.md"
 authors = [{name = "Dean Light"}]
 requires-python = ">=3.12"
 dependencies = [
@@ -41,6 +42,11 @@ test         = {cmd = "pytest",      help = "Run tests"}
 docs         = {cmd = "mkdocs serve",          help = "Serve docs locally for preview"}
 docs-build   = {cmd = "mkdocs build",          help = "Build docs site"}
 docs-deploy  = {cmd = "mkdocs gh-deploy --force", help = "Deploy docs to GitHub Pages"}
+
+[tool.poe.tasks._check_env]
+help = "Assert an env var is set before proceeding"
+script = "juplit._dev:check_env"
+args = [{name = "env_name", positional = true}]
 
 [tool.poe.tasks.pypi]
 help = "Build the package and publish to PyPI"
