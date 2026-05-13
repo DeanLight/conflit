@@ -7,6 +7,18 @@
       members:
         - load
 
+## CLI
+
+See the [CLI guide](cli.md) for an introduction. Reference:
+
+::: conflit.cli
+    options:
+      members:
+        - cli
+        - load_cli_config
+        - parse_dotted_overrides
+        - format_schema_help
+
 ## Core implementation details
 
 The full pipeline implementation lives in `conflit.config`:

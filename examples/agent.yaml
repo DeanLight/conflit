@@ -1,0 +1,7 @@
+# Minimal agent config used by the CLI walkthrough.
+# Override anything with --set, or drop down to cyclopts and inject typed flags.
+task: "Summarise the document."
+model: gpt-4o-mini
+max_iter: 10
+vars:
+  greeting: hello
