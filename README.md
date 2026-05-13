@@ -25,5 +25,6 @@ poe nb       # generate .ipynb notebooks from .py source files
 
 ## Examples
 
-See [`examples/`](examples/) for a layered compose example (including YAML anchors)
-and a percent-format notebook script that rich-prints composition steps.
+See [`examples/`](https://github.com/DeanLight/conflit/tree/main/examples) for a layered compose
+example (including YAML anchors) and a percent-format notebook script that rich-prints
+composition steps.

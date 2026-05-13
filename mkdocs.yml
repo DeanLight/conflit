@@ -1,4 +1,6 @@
 site_name: conflit
+site_description: Layered YAML configuration with compose, merge tags, and optional Pydantic validation.
+repo_url: https://github.com/DeanLight/conflit
 repo_name: Dean Light/conflit
 
 theme:
@@ -6,10 +8,27 @@ theme:
   features:
     - navigation.sections
     - navigation.top
+    - navigation.expand
+    - navigation.indexes
+    - search.highlight
+    - search.suggest
+    - search.share
     - content.code.copy
+    - content.code.annotate
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      base_path: .
+
+watch:
+  - README.md
 
 plugins:
-  - search
+  - search:
+      lang: en
   - mkdocstrings:
       handlers:
         python:
@@ -17,9 +36,15 @@ plugins:
           options:
             show_source: true
             show_root_heading: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
   - mkdocs-jupyter:
       include: ["**/*.ipynb"]
+      execute: false
       ignore_h1_titles: false
 
 nav:
   - Home: index.md
+  - Getting Started: getting_started.md
+  - Configuration Model: configuration_model.md
+  - API Reference: api.md
