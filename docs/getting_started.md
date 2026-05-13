@@ -57,21 +57,32 @@ features:
 
 ## 3. Write an override layer
 
-`gpu_large.yaml` — scale up for a GPU cluster without repeating unchanged keys.
-`!merge` descends into the nested dict; `!append` extends the list:
+`gpu_large.yaml` — scale up for a GPU cluster, patching only the keys that
+change. Dicts merge by default, so `optimizer` and other untouched keys are
+preserved automatically. `!append` is the only tag needed, to accumulate the
+feature list rather than replace it:
 
 ```yaml
-model: !merge
+model:
   num_layers: 12
   hidden_dim: 1024
 
-training: !merge
+training:
   batch_size: 256
   max_epochs: 100
 
 features: !append
   - distributed_training
   - compile_model
+```
+
+Use `!override` when you want to **replace** a nested value entirely rather than
+patch it — for example, swapping out a whole logging block:
+
+```yaml
+logging: !override
+  level: error
+  log_every_n_steps: 500
 ```
 
 ## 4. Compose the layers

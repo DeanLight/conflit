@@ -35,9 +35,9 @@ features:
 ```
 
 ```yaml
-# gpu_large.yaml — scale up without repeating unchanged keys
-model: !merge
-  num_layers: 12    # overrides base; hidden_dim is untouched
+# gpu_large.yaml — patch only what changes; hidden_dim is preserved automatically
+model:
+  num_layers: 12
 features: !append
   - distributed_training
 ```

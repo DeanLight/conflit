@@ -1,22 +1,23 @@
 # GPU-cluster overrides for a full-scale Orion training run.
-# Deep-merges into the baseline so only differing keys are listed here.
-# !merge lets us update nested dicts without repeating unchanged siblings.
+# Dicts merge by default — only keys that change are listed here.
+# Sibling keys in base.yaml are preserved automatically.
+# !append is explicit because list accumulation is opt-in.
 
-model: !merge
+model:
   num_layers: 12
   hidden_dim: 1024
   num_heads: 16
 
-training: !merge
+training:
   batch_size: 256
   max_epochs: 100
   warmup_steps: 2000
 
-data: !merge
+data:
   num_workers: 16
   pin_memory: true
 
-logging: !merge
+logging:
   level: warning
   log_every_n_steps: 200
 
