@@ -42,6 +42,15 @@ docs         = {cmd = "mkdocs serve",          help = "Serve docs locally for pr
 docs-build   = {cmd = "mkdocs build",          help = "Build docs site"}
 docs-deploy  = {cmd = "mkdocs gh-deploy --force", help = "Deploy docs to GitHub Pages"}
 
+[tool.poe.tasks.pypi]
+help = "Build the package and publish to PyPI"
+sequence = [
+    {ref = "_check_env UV_PUBLISH_TOKEN"},
+    {cmd = "rm -rf dist/*"},
+    {cmd = "uv build"},
+    {cmd = "uv publish"},
+]
+
 [tool.juplit]
 notebook_src_dir = "conflit"
 
