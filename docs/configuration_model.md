@@ -10,19 +10,28 @@
 
 ## `_compose` behavior
 
-`_compose` is a list of YAML file paths resolved relative to the file that
-declares them:
+`_compose` is a list of entries resolved relative to the file that declares
+them. Each entry is either a plain path string or a `{path, namespace}` mapping:
 
 ```yaml
 _compose:
-  - base.yaml
-  - gpu_large.yaml
+  - base.yaml                    # merged at root
+  - path: hardware.yaml          # also merged at root (explicit form)
+  - path: hardware.yaml          # all keys land under hardware.*
+    namespace: hardware
+  - path: storage/db.yaml        # all keys land under infra.storage.*
+    namespace: infra.storage
 ```
 
 Resolution is depth-first and cycle-checked. Each loaded YAML contributes a
 `(namespace, payload)` pair — namespace `"."` means root merge. The current
 file's own keys are merged last, so it acts as the final override layer on top
 of everything it composes.
+
+Namespace routing is useful when a config file is written as a flat document
+but you want it to live under a specific key in the merged result — for example,
+composing a standalone `hardware.yaml` under `hardware` so it never collides
+with model or training keys.
 
 ---
 

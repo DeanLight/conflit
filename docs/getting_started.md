@@ -143,11 +143,40 @@ print(cfg.training.optimizer) # "adamw"
 print(cfg.features[-1])       # "wandb_logging"
 ```
 
-## 7. Explore the full example
+## 7. Compose files under a specific key
 
-The `examples/` directory contains the complete three-file Orion setup together
-with a notebook-style walkthrough that prints each YAML layer, the compose
-expansion, the final merged dict, and the Pydantic-validated result:
+By default `_compose` merges each file at the root. Add a `namespace` field to
+scope an entire file under a dotted key instead:
+
+```yaml
+# experiment.yaml
+_compose:
+  - base.yaml
+  - gpu_large.yaml
+  - path: hardware.yaml      # keys land at hardware.*, not at root
+    namespace: hardware
+```
+
+`hardware.yaml` can then be a clean, self-contained document:
+
+```yaml
+# hardware.yaml
+accelerator: a100
+count: 8
+memory_gb: 80
+```
+
+After loading, those keys are accessible at `cfg["hardware"]["accelerator"]` or
+`cfg.hardware.accelerator` when validated through a Pydantic model.  This lets
+you keep per-concern config files flat internally while composing them into a
+structured hierarchy.
+
+## 8. Explore the full example
+
+The `examples/` directory contains the complete four-file Orion setup (including
+`hardware.yaml` scoped under a namespace) together with a notebook-style
+walkthrough that prints each YAML layer, the compose expansion, the final merged
+dict, and the Pydantic-validated result:
 
 ```bash
 uv run python examples/compose_walkthrough.py

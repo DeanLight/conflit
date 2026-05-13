@@ -81,6 +81,10 @@ print(Pretty(final_config))
 #
 # Pass `schema=YourModel` to `load()` and get a fully typed config object —
 # field access, IDE completion, and validation errors for free.
+#
+# Notice `hardware` in the schema: it came from `hardware.yaml` which was
+# composed with `namespace: hardware`, so all its keys landed under `hardware.*`
+# rather than at the root.
 
 # %%
 class ModelConfig(BaseModel):
@@ -120,12 +124,20 @@ class ExperimentMeta(BaseModel):
     tags: list[str]
 
 
+class HardwareConfig(BaseModel):
+    accelerator: str
+    count: int
+    memory_gb: int
+    interconnect: str
+
+
 class OrionConfig(BaseModel):
     model: ModelConfig
     training: TrainingConfig
     data: DataConfig
     logging: LoggingConfig
     experiment: ExperimentMeta
+    hardware: HardwareConfig
     features: list[str]
 
 
@@ -135,5 +147,7 @@ print(f"\n[bold]Model:[/bold] {cfg.model.architecture} "
       f"{cfg.model.num_layers}L × {cfg.model.hidden_dim}d")
 print(f"[bold]Training:[/bold] {cfg.training.max_epochs} epochs, "
       f"batch {cfg.training.batch_size}, lr {cfg.training.learning_rate}")
+print(f"[bold]Hardware:[/bold] {cfg.hardware.count}× {cfg.hardware.accelerator} "
+      f"({cfg.hardware.memory_gb} GB, {cfg.hardware.interconnect})")
 print(f"[bold]Features:[/bold] {cfg.features}")
 print(f"[bold]Experiment:[/bold] {cfg.experiment.name} (seed={cfg.experiment.seed})")

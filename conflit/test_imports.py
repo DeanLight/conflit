@@ -42,12 +42,20 @@ class _ExperimentMeta(BaseModel):
     tags: list[str]
 
 
+class _HardwareCfg(BaseModel):
+    accelerator: str
+    count: int
+    memory_gb: int
+    interconnect: str
+
+
 class _OrionConfig(BaseModel):
     model: _ModelCfg
     training: _TrainingCfg
     data: _DataCfg
     logging: _LoggingCfg
     experiment: _ExperimentMeta
+    hardware: _HardwareCfg
     features: list[str]
 
 
@@ -63,6 +71,7 @@ def test_load_returns_dict_with_expected_keys() -> None:
     assert "training" in cfg
     assert "features" in cfg
     assert "experiment" in cfg
+    assert "hardware" in cfg
 
 
 def test_merge_semantics() -> None:
@@ -99,13 +108,50 @@ def test_append_semantics() -> None:
 
 
 def test_pydantic_validation() -> None:
-    """load(schema=Model) returns a validated model instance with correct field values."""
+    """load(schema=Model) returns a validated model instance matching the expected config."""
     import conflit
 
     cfg = conflit.load(EXPERIMENT, schema=_OrionConfig)
-    assert isinstance(cfg, _OrionConfig)
-    assert cfg.model.num_layers == 12
-    assert cfg.training.batch_size == 256
-    assert cfg.data.pin_memory is True
-    assert cfg.experiment.name == "orion-v1-large"
-    assert "wandb_logging" in cfg.features
+    assert cfg == _OrionConfig(
+        model=_ModelCfg(
+            architecture="transformer",
+            num_layers=12,
+            hidden_dim=1024,
+            num_heads=16,
+            dropout=0.1,
+        ),
+        training=_TrainingCfg(
+            optimizer="adamw",
+            learning_rate=0.0001,
+            weight_decay=0.01,
+            max_epochs=100,
+            batch_size=256,
+            gradient_clip=1.0,
+            warmup_steps=2000,
+        ),
+        data=_DataCfg(
+            train_path="data/train.parquet",
+            val_path="data/val.parquet",
+            num_workers=16,
+            pin_memory=True,
+        ),
+        logging=_LoggingCfg(level="warning", log_every_n_steps=200, save_dir="runs/"),
+        experiment=_ExperimentMeta(
+            name="orion-v1-large",
+            seed=42,
+            tags=["baseline", "gpu-large"],
+        ),
+        hardware=_HardwareCfg(
+            accelerator="a100",
+            count=8,
+            memory_gb=80,
+            interconnect="nvlink",
+        ),
+        features=[
+            "mixed_precision",
+            "gradient_checkpointing",
+            "distributed_training",
+            "compile_model",
+            "wandb_logging",
+        ],
+    )

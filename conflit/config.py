@@ -136,6 +136,35 @@ if test():
 NamespaceDoc = tuple[str, dict[str, Any]]
 
 
+def _parse_compose_entry(entry: Any, compose_key: str) -> tuple[str, str]:
+    """Return ``(file_path_str, namespace)`` from a ``_compose`` list entry.
+
+    Accepts either a plain path string (namespace defaults to ``"."``) or a
+    mapping with ``path`` and an optional ``namespace`` key::
+
+        _compose:
+          - base.yaml                        # namespace "."
+          - path: hardware.yaml              # namespace "."
+          - path: hardware.yaml              # namespace "hardware"
+            namespace: hardware
+          - path: storage/db.yaml            # namespace "infra.storage"
+            namespace: infra.storage
+    """
+    if isinstance(entry, str):
+        return entry, "."
+    if isinstance(entry, dict):
+        if "path" not in entry:
+            raise TypeError(f"{compose_key} dict entry must have a 'path' key, got {list(entry)!r}")
+        extra = {k for k in entry if k not in ("path", "namespace")}
+        if extra:
+            raise TypeError(f"{compose_key} dict entry has unknown keys: {sorted(extra)!r}")
+        return entry["path"], entry.get("namespace", ".")
+    raise TypeError(
+        f"{compose_key} entries must be a file path string or a {{path, namespace}} mapping, "
+        f"got {type(entry).__name__!r}"
+    )
+
+
 def load_namespaces(
     path: Path,
     *,
@@ -145,10 +174,18 @@ def load_namespaces(
     """
     Load one YAML and expand `_compose` into ordered `(namespace, yaml_obj)` records.
 
-    Rules:
-    - Namespace `"."` means root merge.
-    - `_compose` is a list of YAML file paths.
-    - Resolution is depth-first: children first, then current document body.
+    Each entry in `_compose` is either a plain path string (merged at root) or a
+    ``{path, namespace}`` mapping that scopes the included file under a dotted key::
+
+        _compose:
+          - base.yaml                   # merged at root
+          - path: hardware.yaml         # merged at root (explicit form)
+          - path: hardware.yaml         # merged under the "hardware" key
+            namespace: hardware
+          - path: storage/db.yaml       # merged under "infra.storage"
+            namespace: infra.storage
+
+    Resolution is depth-first and cycle-checked. Namespace `"."` means root merge.
 
     Args:
         path: YAML file to load.
@@ -169,14 +206,20 @@ def load_namespaces(
     if raw_compose is not None:
         if not isinstance(raw_compose, list):
             raise TypeError(f"{compose_key} must be a list")
-        for include_path in raw_compose:
-            if not isinstance(include_path, str):
-                raise TypeError(f"{compose_key} entries must be file paths (strings)")
-            include_abs = Path(include_path)
+        for entry in raw_compose:
+            include_str, namespace = _parse_compose_entry(entry, compose_key)
+            include_abs = Path(include_str)
             include_abs = (
-                include_abs.resolve() if include_abs.is_absolute() else (canon.parent / include_abs).resolve()
+                include_abs.resolve() if include_abs.is_absolute() else (canon.parent / include_str).resolve()
             )
-            docs.extend(load_namespaces(include_abs, compose_key=compose_key, stack=(*stack, canon)))
+            child_docs = load_namespaces(include_abs, compose_key=compose_key, stack=(*stack, canon))
+            if namespace == ".":
+                docs.extend(child_docs)
+            else:
+                # Wrap every child namespace under the declared namespace prefix.
+                for child_ns, payload in child_docs:
+                    combined = namespace if child_ns == "." else f"{namespace}.{child_ns}"
+                    docs.append((combined, payload))
 
     docs.append((".", {k: v for k, v in raw.items() if k != compose_key}))
     return docs
@@ -190,6 +233,20 @@ if test():
         (t / "base.yaml").write_text("a: 1\n", encoding="utf-8")
         (t / "main.yaml").write_text("_compose:\n  - base.yaml\nb: 2\n", encoding="utf-8")
         assert load_namespaces(t / "main.yaml") == [(".", {"a": 1}), (".", {"b": 2})]
+
+
+if test():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp_s:
+        t = Path(tmp_s)
+        (t / "hw.yaml").write_text("gpu: a100\ncount: 8\n", encoding="utf-8")
+        (t / "main.yaml").write_text(
+            "_compose:\n  - path: hw.yaml\n    namespace: hardware\na: 1\n",
+            encoding="utf-8",
+        )
+        result = load_namespaces(t / "main.yaml")
+        assert result == [("hardware", {"gpu": "a100", "count": 8}), (".", {"a": 1})]
 
 
 class MergeStrategy(StrEnum):
@@ -327,6 +384,19 @@ if test():
     assert merge_yamls([(".", {"tags": ["a"]}), (".", {"tags": TaggedAppend(["b"])})]) == {
         "tags": ["a", "b"]
     }
+
+if test():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp_s:
+        t = Path(tmp_s)
+        (t / "hw.yaml").write_text("gpu: a100\ncount: 8\n", encoding="utf-8")
+        (t / "main.yaml").write_text(
+            "_compose:\n  - path: hw.yaml\n    namespace: hardware\na: 1\n",
+            encoding="utf-8",
+        )
+        result = load_namespaces(t / "main.yaml")
+        assert merge_yamls(result) == {"hardware": {"gpu": "a100", "count": 8}, "a": 1}
 
 
 def strip_conflit_markers(obj: Any) -> Any:
