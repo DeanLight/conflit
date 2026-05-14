@@ -20,7 +20,7 @@
 # three YAML layers:
 #
 # 1. `base.yaml` — shared defaults (model arch, optimizer, data paths)
-# 2. `gpu_large.yaml` — GPU-cluster overrides using `!merge` / `!append`
+# 2. `gpu_large.yaml` — GPU-cluster overrides using default deep-merge + `!append`
 # 3. `experiment.yaml` — compose entry that ties them together and adds metadata
 #
 # After walking through the merge steps we validate the result against a
@@ -43,8 +43,8 @@ MAIN_FILE = EXAMPLES_DIR / "experiment.yaml"
 # %% [markdown]
 # ## Raw YAML source files
 #
-# Each file is self-contained and human-readable. `!merge` / `!append` tags
-# express *how* a key should combine with the layer below — no Python glue needed.
+# Each file is self-contained and human-readable. Dicts deep-merge by default;
+# `!override` / `!append` tags express explicit non-default behavior.
 
 # %%
 for source in ("base.yaml", "gpu_large.yaml", "experiment.yaml"):
@@ -68,7 +68,7 @@ for namespace, payload in docs:
 # %% [markdown]
 # ## Final merged config (plain dict)
 #
-# `load()` applies the three-phase pipeline: expand → merge → strip markers.
+# `load()` applies the three-phase pipeline: expand → merge → validate (optional).
 # Notice that `model`, `training`, and `data` reflect the GPU-layer overrides,
 # while `features` is the full accumulated list across all three files.
 

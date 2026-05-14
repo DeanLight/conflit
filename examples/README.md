@@ -6,7 +6,7 @@ an imaginary model called **Orion**, across three YAML files that compose togeth
 ## Files
 
 - `base.yaml` — shared defaults: model architecture, optimizer, data paths, logging.
-- `gpu_large.yaml` — full-scale GPU overrides using `!merge` to update nested
+- `gpu_large.yaml` — full-scale GPU overrides using default deep-merge for nested
   dicts (larger model, bigger batches) and `!append` to accumulate feature flags.
 - `hardware.yaml` — standalone GPU cluster spec, composed under the `hardware`
   namespace so all its keys land at `hardware.*` in the final config.

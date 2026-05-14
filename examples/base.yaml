@@ -1,6 +1,7 @@
 # Baseline training configuration for the Orion model.
 # These are the shared defaults used across all environments.
-# Override specific keys in environment-specific files using !merge / !append.
+# Override specific keys in environment-specific files using default dict merge,
+# with !override / !append when explicit behavior is needed.
 
 model:
   architecture: transformer

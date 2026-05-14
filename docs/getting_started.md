@@ -11,7 +11,7 @@ infrastructure — anywhere you want layered config with precise merge control.
 
 1. Write layered YAML files — each file only contains what it changes.
 2. Declare composition order with `_compose`.
-3. Use `!merge` to deep-merge nested dicts; use `!append` to accumulate lists.
+3. Dicts deep-merge by default; use `!override` to replace and `!append` to accumulate lists.
 4. Call `load()` to get a merged dict, or pass `schema=YourModel` for a validated
    Pydantic instance.
 

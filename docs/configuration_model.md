@@ -95,20 +95,6 @@ The final `features` list will be
 — order preserved, no duplicates removed (deduplication is left to the
 application if needed).
 
-### Legacy `_conflit` key
-
-`_conflit` is still recognised for compatibility:
-
-```yaml
-training:
-  _conflit: override
-  batch_size: 256
-```
-
-Supported strategy values: `override`, `merge`, `append`.
-
----
-
 ## Validation
 
 Pass `schema=YourModel` to `load()` with a Pydantic model to turn the merged dict

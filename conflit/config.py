@@ -17,7 +17,7 @@
 # # Unified YAML pipeline
 #
 # Single-file implementation for:
-# - YAML constructors (`!merge` / `!append`)
+# - YAML constructors (`!override` / `!append`)
 # - compose expansion into `(namespace, yaml_obj)` records
 # - recursive merge semantics
 # - optional Pydantic validation
@@ -27,14 +27,11 @@
 from __future__ import annotations
 
 import copy
-import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
 from typing import Any, TypeVar
 
-import structlog
 import yaml
 from juplit import test
 from pydantic import BaseModel
@@ -42,10 +39,6 @@ from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode, SequenceNode
 
 T = TypeVar("T", bound=BaseModel)
-log = structlog.stdlib.get_logger(__name__)
-# stdlib logger used only to guard structlog calls; avoids structlog overhead
-# when DEBUG is off, since structlog does not short-circuit before formatting.
-stdlib_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,102 +249,71 @@ if test():
         assert result == [("hardware", {"gpu": "a100", "count": 8}), (".", {"a": 1})]
 
 
-class MergeStrategy(StrEnum):
-    OVERRIDE = "override"
-    MERGE = "merge"
-    APPEND = "append"
-
-
-def peel_merge_strategy(value: Any) -> tuple[MergeStrategy, Any]:
-    if isinstance(value, TaggedOverride):
-        return MergeStrategy.OVERRIDE, value.value
-    if isinstance(value, TaggedAppend):
-        return MergeStrategy.APPEND, value.sequence
-    if isinstance(value, dict) and "_conflit" in value:
-        raw = value["_conflit"]
-        if not isinstance(raw, str):
-            raise TypeError(f"_conflit must be a string strategy, got {type(raw).__name__}")
-        try:
-            strategy = MergeStrategy(raw.strip().lower())
-        except ValueError as exc:
-            raise ValueError(f"unknown _conflit strategy {raw!r}") from exc
-        return strategy, {k: v for k, v in value.items() if k != "_conflit"}
-    return MergeStrategy.MERGE, value
-
-
-if test():
-    assert peel_merge_strategy(TaggedOverride({"x": 1}))[0] is MergeStrategy.OVERRIDE
-    assert peel_merge_strategy(TaggedOverride(42)) == (MergeStrategy.OVERRIDE, 42)
-    assert peel_merge_strategy(TaggedAppend(["a"]))[0] is MergeStrategy.APPEND
-    assert peel_merge_strategy({"_conflit": "override", "x": 1}) == (
-        MergeStrategy.OVERRIDE,
-        {"x": 1},
-    )
-    # plain dict defaults to MERGE
-    assert peel_merge_strategy({"x": 1})[0] is MergeStrategy.MERGE
-
-
-def _coerce_append_list(peeled: Any) -> list[Any]:
-    if isinstance(peeled, list):
-        return copy.deepcopy(peeled)
-    if isinstance(peeled, dict):
-        if len(peeled) != 1:
-            raise ValueError(
-                "append with a bare mapping expects exactly one list-valued field; "
-                f"got keys {list(peeled)!r}"
-            )
-        (_name, seq), = peeled.items()
-        if not isinstance(seq, list):
-            raise TypeError("append legacy mapping field must hold a list")
-        return copy.deepcopy(seq)
-    raise TypeError(f"append expects list payload, got {type(peeled).__name__}")
-
-
 _MISSING = object()
 
 
-def _merge_dict(base: dict[str, Any], overlay: Mapping[str, Any], *, path: str = ".") -> None:
-    for key, raw_overlay in overlay.items():
-        strategy, peeled = peel_merge_strategy(raw_overlay)
-        existing = base.get(key, _MISSING)
-        key_path = key if path == "." else f"{path}.{key}"
-        if stdlib_log.isEnabledFor(logging.DEBUG):
-            log.debug(
-                "merge.step",
-                path=key_path,
-                strategy=strategy.value,
-                existing_type=type(existing).__name__,
-                incoming_type=type(peeled).__name__,
+def _path_str(path: tuple[str, ...]) -> str:
+    return ".".join(path) if path else "."
+
+
+def add_wrappers(obj: Any) -> Any:
+    """Recursively normalize objects coming from the YAML loader.
+
+    The loader already emits wrapper types (`TaggedOverride`, `TaggedAppend`) when
+    explicit merge tags are used. This function keeps the normalization pass in one
+    place and recursively prepares nested values for merge processing.
+    """
+    match obj:
+        case TaggedOverride(value=value):
+            return TaggedOverride(add_wrappers(value))
+        case TaggedAppend(sequence=sequence):
+            return TaggedAppend([add_wrappers(item) for item in sequence])
+        case dict() as mapping:
+            return {key: add_wrappers(value) for key, value in mapping.items()}
+        case list() as sequence:
+            return [add_wrappers(item) for item in sequence]
+        case _:
+            return obj
+
+
+def merge_value(current: Any, nxt: Any, *, path: tuple[str, ...] = ()) -> Any:
+    """Recursively merge two values, honoring explicit wrapper strategies."""
+    match nxt:
+        case TaggedOverride(value=value):
+            return merge_value(_MISSING, value, path=path)
+        case TaggedAppend(sequence=sequence):
+            incoming = [merge_value(_MISSING, item, path=(*path, str(idx))) for idx, item in enumerate(sequence)]
+            if current is _MISSING or current is None:
+                return incoming
+            if isinstance(current, list):
+                return [*current, *incoming]
+            raise TypeError(
+                f"append at {_path_str(path)!r}: base must be list or absent, "
+                f"got {type(current).__name__}"
             )
+        case _:
+            pass
 
-        if strategy == MergeStrategy.OVERRIDE:
-            base[key] = copy.deepcopy(peeled)
-            continue
-
-        if strategy == MergeStrategy.APPEND:
-            incoming_list = _coerce_append_list(peeled)
-            if existing is _MISSING or existing is None:
-                base[key] = copy.deepcopy(incoming_list)
-            elif isinstance(existing, list):
-                base[key] = [*existing, *incoming_list]
-            else:
-                raise TypeError(
-                    f"append at {key_path!r}: base must be list or absent, "
-                    f"got {type(existing).__name__}"
-                )
-            continue
-
-        if isinstance(peeled, dict):
-            if existing is _MISSING or existing is None:
-                nested: dict[str, Any] = {}
-                base[key] = nested
-                _merge_dict(nested, peeled, path=key_path)
-            elif isinstance(existing, dict):
-                _merge_dict(existing, peeled, path=key_path)
-            else:
-                base[key] = copy.deepcopy(peeled)
-        else:
-            base[key] = copy.deepcopy(peeled)
+    match (current, nxt):
+        case (dict() as existing_dict, dict() as incoming_dict):
+            out = copy.deepcopy(existing_dict)
+            for key, value in incoming_dict.items():
+                out[key] = merge_value(out.get(key, _MISSING), value, path=(*path, str(key)))
+            return out
+        case (_, dict() as incoming_dict) if current is _MISSING:
+            return {
+                key: merge_value(_MISSING, value, path=(*path, str(key)))
+                for key, value in incoming_dict.items()
+            }
+        case (_, list() as incoming_list) if current is _MISSING:
+            return [
+                merge_value(_MISSING, value, path=(*path, str(idx)))
+                for idx, value in enumerate(incoming_list)
+            ]
+        case (_, _) if current is _MISSING:
+            return copy.deepcopy(nxt)
+        case _:
+            return copy.deepcopy(nxt)
 
 
 def _nest_namespace(namespace: str, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -382,7 +344,8 @@ def merge_yamls(namespaces: list[NamespaceDoc]) -> dict[str, Any]:
         clean_ns = namespace.strip() or "."
         if clean_ns != "." and any(seg == "" for seg in clean_ns.split(".")):
             raise ValueError(f"namespace contains empty segment: {namespace!r}")
-        _merge_dict(merged, _nest_namespace(clean_ns, payload))
+        layer = add_wrappers(_nest_namespace(clean_ns, payload))
+        merged = merge_value(merged, layer)
     return merged
 
 
@@ -393,6 +356,10 @@ if test():
     }
     assert merge_yamls([(".", {"tags": ["a"]}), (".", {"tags": TaggedAppend(["b"])})]) == {
         "tags": ["a", "b"]
+    }
+    # Wrapper values are always consumed and absent from the merged output.
+    assert merge_yamls([(".", {"cfg": TaggedOverride({"a": TaggedAppend(["x"])})})]) == {
+        "cfg": {"a": ["x"]}
     }
 
 if test():
@@ -409,29 +376,11 @@ if test():
         assert merge_yamls(result) == {"hardware": {"gpu": "a100", "count": 8}, "a": 1}
 
 
-def strip_conflit_markers(obj: Any) -> Any:
-    if isinstance(obj, TaggedOverride):
-        return strip_conflit_markers(obj.value)
-    if isinstance(obj, TaggedAppend):
-        return [strip_conflit_markers(x) for x in obj.sequence]
-    if isinstance(obj, dict):
-        return {k: strip_conflit_markers(v) for k, v in obj.items() if str(k) != "_conflit"}
-    if isinstance(obj, list):
-        return [strip_conflit_markers(x) for x in obj]
-    return obj
-
-
-if test():
-    assert strip_conflit_markers({"a": TaggedOverride({"b": 1})}) == {"a": {"b": 1}}
-    assert strip_conflit_markers({"a": TaggedOverride([1, 2])}) == {"a": [1, 2]}
-    assert strip_conflit_markers({"x": {"_conflit": "override", "y": 2}}) == {"x": {"y": 2}}
-
-
 def yaml_validate(obj: Mapping[str, Any], config_cls: type[T]) -> T:
     """Validate a merged YAML dict against a Pydantic model class.
 
     Args:
-        obj: Merged config dict, already stripped of conflit markers.
+        obj: Merged config dict.
         config_cls: Pydantic model class to validate against.
 
     Returns:
@@ -454,8 +403,8 @@ def load(
 
     1. **Expand** — recursively resolve ``_compose`` entries depth-first into
        ordered ``(namespace, payload)`` pairs.
-    2. **Merge** — fold pairs into one dict using override / ``!merge`` /
-       ``!append`` semantics.
+    2. **Merge** — fold pairs into one dict using default dict deep-merge plus
+       ``!override`` / ``!append`` semantics.
     3. **Validate** (optional) — pass the merged dict through a Pydantic model.
 
     Args:
@@ -483,7 +432,7 @@ def load(
     docs = load_namespaces(Path(config_file), compose_key=compose_key)
     if overrides:
         docs.append((".", dict(overrides)))
-    clean = strip_conflit_markers(merge_yamls(docs))
+    clean = merge_yamls(docs)
     if schema is None:
         return clean
     return yaml_validate(clean, schema)
@@ -493,7 +442,7 @@ def load(
 if test():
     # End-to-end: mirrors the examples/ Orion training config story.
     # base.yaml sets defaults; gpu_layer.yaml patches them (dicts merge by
-    # default — no !merge needed) and appends feature flags; experiment.yaml
+    # default) and appends feature flags; experiment.yaml
     # composes both, scopes hardware.yaml under a namespace, and adds metadata.
     import tempfile
 
