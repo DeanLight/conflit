@@ -1,6 +1,6 @@
 [project]
 name = "conflit"
-version = "0.1.2"
+version = "0.1.3"
 description = "lightweight configuration management library"
 readme = "README.md"
 authors = [{name = "Dean Light"}]
