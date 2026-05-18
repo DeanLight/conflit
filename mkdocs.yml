@@ -60,5 +60,6 @@ nav:
   - Home: index.md
   - Getting Started: getting_started.md
   - Configuration Model: configuration_model.md
+  - Context Groups: contextgroup.md
   - CLI: cli.md
   - API Reference: api.md
