@@ -6,6 +6,8 @@
     options:
       members:
         - load
+        - Context
+        - TrackedVar
 
 ## CLI
 
@@ -29,3 +31,13 @@ The full pipeline implementation lives in `conflit.config`:
         - load_namespaces
         - merge_yamls
         - yaml_validate
+
+## Context groups
+
+See the [Context Groups guide](contextgroup.md) for an introduction. Reference:
+
+::: conflit.contextgroup
+    options:
+      members:
+        - Context
+        - TrackedVar
