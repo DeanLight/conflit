@@ -101,6 +101,12 @@ class Context:
     Each var's derive() receives ``(parent_value, inputs)`` where inputs is the
     union of caller-supplied kwargs and already-derived sibling new values.
 
+    Each ``TrackedVar`` is also accessible as a named attribute on the
+    ``Context`` instance, so ``ctx.my_var.get()`` works in addition to
+    searching ``ctx.vars`` by name.  The names ``vars``, ``structlog_keys``,
+    ``_on_bind``, ``reset``, and ``bind`` are reserved and must not be used as
+    ``TrackedVar`` names.
+
     Args:
         *vars:           The tracked variables in this group.
         structlog_keys:  Subset of var names to mirror into structlog
@@ -121,6 +127,8 @@ class Context:
         self.vars = vars
         self.structlog_keys = structlog_keys
         self._on_bind = on_bind
+        for var in vars:
+            setattr(self, var.name, var)
 
     def reset(self) -> None:
         for tracked in self.vars:
@@ -250,3 +258,19 @@ if test():
         ctx = structlog.contextvars.get_contextvars()
         assert "a" not in ctx
         assert "b" not in ctx
+
+
+# %%
+if test():
+    # TrackedVar instances are accessible as named attributes on the Context.
+    tv = TrackedVar("depth", default=0, derive=lambda p, _: p + 1)
+    cg = Context(tv)
+
+    assert cg.depth is tv
+
+    with cg.bind():
+        assert cg.depth.get() == 1
+        cg.depth.set(99)
+        assert cg.depth.get() == 99
+
+    assert cg.depth.get() == 0
