@@ -61,6 +61,35 @@ with ctx.bind() as values:
         ...
 ```
 
+### Attribute access
+
+Each `TrackedVar` is also reachable as a named attribute on the `Context`
+instance. This lets you call `.get()` and `.set()` without searching
+`ctx.vars` by name:
+
+```python
+log_dir = TrackedVar(
+    "log_dir",
+    default="/tmp",
+    derive=lambda parent, kw: kw.get("log_dir", parent),
+)
+depth = TrackedVar("depth", default=0, derive=lambda p, _: p + 1)
+
+ctx = Context(log_dir, depth)
+
+with ctx.bind(log_dir="/runs/exp1"):
+    print(ctx.log_dir.get())  # /runs/exp1
+    print(ctx.depth.get())    # 1
+    ctx.log_dir.set("/runs/exp1/phase2")
+    print(ctx.log_dir.get())  # /runs/exp1/phase2
+
+print(ctx.log_dir.get())  # /tmp  — restored after bind exits
+print(ctx.depth.get())    # 0
+```
+
+The names `vars`, `structlog_keys`, `_on_bind`, `reset`, and `bind` are
+reserved and must not be used as `TrackedVar` names.
+
 ### structlog sync
 
 By default every var in the group is mirrored into structlog's
